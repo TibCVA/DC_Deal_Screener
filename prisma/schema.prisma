@@ -129,6 +129,21 @@ model AnalysisRun {
   summary       String
   checklist     Json
   createdAt     DateTime  @default(now())
+  evidenceSnippets AnalysisEvidenceSnippet[]
+}
+
+model AnalysisEvidenceSnippet {
+  id             String   @id @default(uuid())
+  analysisRun    AnalysisRun @relation(fields: [analysisRunId], references: [id])
+  analysisRunId  String
+  snippetId      String
+  text           String
+  fileId         String?
+  fileName       String?
+  score          Float?
+  createdAt      DateTime @default(now())
+
+  @@unique([analysisRunId, snippetId])
 }
 
 model AuditLog {

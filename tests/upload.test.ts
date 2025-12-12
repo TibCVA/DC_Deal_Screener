@@ -15,6 +15,10 @@ const { mockDealUpdate, mockDealFindUnique, mockDealDocumentCreate, mockDealDocu
   mockDealDocumentUpdate: vi.fn(),
 }));
 
+vi.mock('mailparser', () => ({
+  simpleParser: vi.fn().mockResolvedValue({ text: '', attachments: [] }),
+}));
+
 vi.mock('next-auth', () => ({
   getServerSession: vi.fn().mockResolvedValue({ user: { id: 'user1' } }),
 }));
