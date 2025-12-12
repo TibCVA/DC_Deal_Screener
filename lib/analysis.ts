@@ -66,9 +66,11 @@ function findSnippets(text: string, keywords: string[]) {
 export async function runDeterministicAnalysis({
   dealId,
   userId,
+  organizationId,
 }: {
   dealId: string;
   userId: string;
+  organizationId: string;
 }) {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
@@ -79,6 +81,7 @@ export async function runDeterministicAnalysis({
     },
   });
   if (!deal) throw new Error('Deal not found');
+  if (deal.fund.organizationId !== organizationId) throw new Error('Forbidden');
   const countryPack = deal.fund.organization.countryPacks.find((p) => p.countryCode === deal.country) ??
     deal.fund.organization.countryPacks[0];
 

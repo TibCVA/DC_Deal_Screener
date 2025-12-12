@@ -1,15 +1,20 @@
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { DealType } from '@prisma/client';
+import { DealType, Role } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { getServerSession } from 'next-auth';
 import { redirect } from 'next/navigation';
 
-async function createDeal(formData: FormData, userId: string) {
+async function createDeal(formData: FormData) {
   'use server';
-  const membership = await prisma.membership.findFirst({ where: { userId } });
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) throw new Error('Unauthorized');
+  const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
   if (!membership) throw new Error('Not authorized');
+  if (membership.role === Role.VIEWER) throw new Error('Insufficient role');
   const fundId = String(formData.get('fundId'));
+  const fund = await prisma.fund.findFirst({ where: { id: fundId, organizationId: membership.organizationId } });
+  if (!fund) throw new Error('Forbidden');
   const name = String(formData.get('name'));
   const country = String(formData.get('country'));
   const city = String(formData.get('city'));
@@ -27,13 +32,17 @@ export default async function NewDealPage() {
   if (!membership) return null;
   const funds = await prisma.fund.findMany({ where: { organizationId: membership.organizationId } });
 
+  if (membership.role === Role.VIEWER) {
+    return <div className="rounded-xl bg-white p-6 shadow">You do not have permission to create deals.</div>;
+  }
+
   return (
     <div className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Create deal</h1>
         <p className="text-sm text-slate-500">Capture the basics to start screening.</p>
       </div>
-      <form action={(formData) => createDeal(formData, (session.user as any).id)} className="card space-y-4 p-6">
+      <form action={createDeal} className="card space-y-4 p-6">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1">
             <label className="text-sm text-slate-600">Fund</label>

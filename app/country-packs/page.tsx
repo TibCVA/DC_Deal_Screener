@@ -2,9 +2,16 @@ import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { getServerSession } from 'next-auth';
+import { Role } from '@prisma/client';
 
 async function saveCountryPack(formData: FormData, packId: string) {
   'use server';
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) throw new Error('Unauthorized');
+  const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
+  if (!membership || membership.role !== Role.ADMIN) throw new Error('Forbidden');
+  const pack = await prisma.countryPack.findFirst({ where: { id: packId, organizationId: membership.organizationId } });
+  if (!pack) throw new Error('Forbidden');
   const allowedDomains = String(formData.get('allowedDomains')).split(',').map((d) => d.trim()).filter(Boolean);
   const goldSources = String(formData.get('goldSources'));
   const artefacts = String(formData.get('artefacts'));
@@ -24,6 +31,9 @@ export default async function CountryPacksPage() {
   if (!session?.user?.id) return null;
   const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
   if (!membership) return null;
+  if (membership.role !== Role.ADMIN) {
+    return <div className="rounded-xl bg-white p-6 shadow">Only admins can edit country packs.</div>;
+  }
   const packs = await prisma.countryPack.findMany({ where: { organizationId: membership.organizationId } });
 
   return (

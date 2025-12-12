@@ -1,5 +1,6 @@
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { Role } from '@prisma/client';
 import { getServerSession } from 'next-auth';
 import Link from 'next/link';
 
@@ -17,7 +18,9 @@ export default async function DealsPage() {
           <h1 className="text-2xl font-semibold">Deals</h1>
           <p className="text-sm text-slate-500">All active opportunities in your fund.</p>
         </div>
-        <Link href="/deals/new" className="btn-primary">New deal</Link>
+        {[Role.ADMIN, Role.ANALYST].includes(membership.role) && (
+          <Link href="/deals/new" className="btn-primary">New deal</Link>
+        )}
       </div>
       <div className="card divide-y divide-slate-100">
         {deals.map((deal) => (
