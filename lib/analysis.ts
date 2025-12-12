@@ -1,13 +1,24 @@
 import crypto from 'crypto';
 import { z } from 'zod';
+import { sanitizeAllowedDomainsInput, normalizeUrlForClick } from './allowedDomains';
 import { openai, OPENAI_MODEL } from './openai';
 import { prisma } from './prisma';
 
-type MarketResearch = {
-  summary: string;
-  sources: string[];
-  citations: string[];
-};
+type MarketResearch =
+  | {
+      status: 'COMPLETED';
+      summary: string;
+      sources: string[];
+      citations: string[];
+      officialChecks?: string[];
+    }
+  | {
+      status: 'SKIPPED' | 'FAILED';
+      reason: string;
+      sources?: string[];
+      citations?: string[];
+      officialChecks?: string[];
+    };
 
 export const ScoreStatusValues = {
   VERIFIED: 'VERIFIED',
@@ -34,6 +45,7 @@ export const checklistSchema = z.array(
     question: z.string(),
     why: z.string().optional(),
     requested_artifact: z.string().nullable().optional(),
+    contextual: z.boolean().optional(),
   })
 );
 
@@ -229,7 +241,8 @@ async function runMarketResearch({
   country: string;
   allowedDomains: string[];
 }): Promise<MarketResearch | null> {
-  if (!openai?.responses?.create) return null;
+  const openaiClient = openai as any;
+  if (!openaiClient?.responses?.create) return null;
   if (!allowedDomains || allowedDomains.length === 0) return null;
 
   const prompt = [
@@ -240,7 +253,7 @@ async function runMarketResearch({
     'Cite sources inline using [1], [2] etc. Ensure citations map to the sources you consulted.',
   ].join('\n');
 
-  const response = await openai.responses
+  const response = await openaiClient.responses
     .create({
       model: OPENAI_MODEL,
       input: prompt,
@@ -253,10 +266,10 @@ async function runMarketResearch({
 
   const summary = extractTextFromResponse(response).trim();
   if (!summary) return null;
-  const sources = extractSourcesFromResponse(response);
-  const citations = extractCitationsFromSummary(summary, sources);
+  const sources = extractSourcesFromResponse(response).map(normalizeUrlForClick).filter(Boolean);
+  const citations = extractCitationsFromSummary(summary, sources).map(normalizeUrlForClick).filter(Boolean);
 
-  return { summary, sources, citations };
+  return { status: 'COMPLETED', summary, sources, citations };
 }
 
 export async function runDeterministicAnalysis({
@@ -282,17 +295,35 @@ export async function runDeterministicAnalysis({
 
   const snippets = await retrieveEvidenceSnippets(deal.openaiVectorStoreId || undefined);
   const evidence = await extractFacts(snippets);
-  const checklist = buildChecklist(evidence.extracted_facts, evidence.checks);
+  let checklist = buildChecklist(evidence.extracted_facts, evidence.checks);
   const scorecard = buildScorecard(evidence.extracted_facts);
-  const confidence = computeEnergizationConfidence(evidence.extracted_facts, checklist.length);
-  const summary = `Evidence-led view: ${scorecard.filter((s) => s.status === ScoreStatusValues.VERIFIED).length} verified, ${scorecard.filter((s) => s.status === ScoreStatusValues.UNKNOWN).length} unknown. Energization confidence: ${confidence}%`;
 
   const countryPack = deal.fund.organization.countryPacks.find(
     (p) => p.countryCode.toLowerCase() === deal.country.toLowerCase()
   );
-  const marketResearch = includeMarketResearch
-    ? await runMarketResearch({ country: deal.country, allowedDomains: countryPack?.allowedDomains || [] }).catch(() => null)
-    : null;
+  const allowedDomains = sanitizeAllowedDomainsInput(countryPack?.allowedDomains || []).sanitized;
+  let marketResearch: MarketResearch | null = null;
+
+  if (includeMarketResearch) {
+    if (!allowedDomains || allowedDomains.length === 0) {
+      marketResearch = { status: 'SKIPPED', reason: 'No allowed domains configured' };
+      checklist = checklist.concat({
+        priority: 'Medium',
+        question: 'Configure official allowed domains in the Country Pack to enable official market research.',
+        why: 'No allowed domains configured for this country',
+        requested_artifact: null,
+        contextual: true,
+      });
+    } else {
+      marketResearch =
+        (await runMarketResearch({ country: deal.country, allowedDomains }).catch(() => null)) ??
+        ({ status: 'FAILED', reason: 'Market research unavailable' } as MarketResearch);
+    }
+  }
+
+  const confidence = computeEnergizationConfidence(evidence.extracted_facts, checklist);
+
+  const summary = `Evidence-led view: ${scorecard.filter((s) => s.status === ScoreStatusValues.VERIFIED).length} verified, ${scorecard.filter((s) => s.status === ScoreStatusValues.UNKNOWN).length} unknown. Energization confidence: ${confidence}%`;
 
   const run = await prisma.analysisRun.create({
     data: {
@@ -303,6 +334,7 @@ export async function runDeterministicAnalysis({
       summary,
       checklist: checklistSchema.parse(checklist),
       marketResearch: marketResearch || undefined,
+      marketResearchIncluded: Boolean(includeMarketResearch),
       status: 'SUCCESS',
       errorMessage: null,
       modelUsed: OPENAI_MODEL,
@@ -388,7 +420,8 @@ function buildScorecard(facts: ExtractedFacts) {
   ];
 }
 
-export function computeEnergizationConfidence(facts: ExtractedFacts, outstandingChecks: number) {
+export function computeEnergizationConfidence(facts: ExtractedFacts, checklist: ChecklistItem[]) {
+  const outstandingChecks = checklist.filter((item) => !item.contextual).length;
   let score = 35;
   if (facts.reserved_mw.value) score += 20;
   if (facts.firmness_type.value === 'firm') score += 15;
