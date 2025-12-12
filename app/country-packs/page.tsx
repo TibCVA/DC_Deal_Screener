@@ -12,7 +12,17 @@ async function saveCountryPack(formData: FormData, packId: string) {
   if (!membership || membership.role !== Role.ADMIN) throw new Error('Forbidden');
   const pack = await prisma.countryPack.findFirst({ where: { id: packId, organizationId: membership.organizationId } });
   if (!pack) throw new Error('Forbidden');
-  const allowedDomains = String(formData.get('allowedDomains')).split(',').map((d) => d.trim()).filter(Boolean);
+  const allowedDomains = String(formData.get('allowedDomains') || '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  if (allowedDomains.length > 100) {
+    throw new Error('You can only specify up to 100 allowed domains.');
+  }
+  const invalid = allowedDomains.find((d) => d.includes('://'));
+  if (invalid) {
+    throw new Error('Allowed domains must exclude http/https prefixes.');
+  }
   const goldSources = String(formData.get('goldSources'));
   const artefacts = String(formData.get('artefacts'));
   await prisma.countryPack.update({
@@ -53,7 +63,7 @@ export default async function CountryPacksPage() {
           </div>
           <div className="space-y-3">
             <div className="space-y-1">
-              <label className="text-sm text-slate-600">Allowed domains (for external web search)</label>
+              <label className="text-sm text-slate-600">Official allowed domains for web search</label>
               <textarea name="allowedDomains" defaultValue={pack.allowedDomains.join(', ')} className="w-full" rows={2}></textarea>
             </div>
             <div className="space-y-1">

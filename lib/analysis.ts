@@ -3,6 +3,12 @@ import { z } from 'zod';
 import { openai, OPENAI_MODEL } from './openai';
 import { prisma } from './prisma';
 
+type MarketResearch = {
+  summary: string;
+  sources: string[];
+  citations: string[];
+};
+
 export const ScoreStatusValues = {
   VERIFIED: 'VERIFIED',
   PARTIAL: 'PARTIAL',
@@ -173,14 +179,96 @@ async function extractFacts(snippets: EvidenceSnippet[]) {
   return { extracted_facts: normalizedFacts, checks: parsed.checks };
 }
 
+function extractTextFromResponse(response: any) {
+  if (!response) return '';
+  if (typeof response.output_text === 'string') return response.output_text;
+  const outputContent = (response.output || []).flatMap((o: any) => o?.content || []);
+  const textChunk = outputContent.find((c: any) => typeof c?.text === 'string' || typeof c?.output_text === 'string');
+  if (textChunk?.text) return textChunk.text;
+  if (textChunk?.output_text) return textChunk.output_text;
+  return '';
+}
+
+function collectSourcesFromValue(value: any, bucket: Set<string>) {
+  if (!value) return;
+  if (typeof value === 'string') {
+    bucket.add(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((v) => collectSourcesFromValue(v, bucket));
+    return;
+  }
+  if (typeof value === 'object') {
+    collectSourcesFromValue((value as any).url || (value as any).link || (value as any).source || (value as any).href, bucket);
+  }
+}
+
+function extractSourcesFromResponse(response: any): string[] {
+  const sources = new Set<string>();
+  collectSourcesFromValue(response?.web_search_call?.action?.sources, sources);
+  const outputs = Array.isArray(response?.output) ? response.output : [];
+  outputs.forEach((item: any) => {
+    collectSourcesFromValue(item?.web_search_call?.action?.sources, sources);
+    const content = Array.isArray(item?.content) ? item.content : [];
+    content.forEach((c: any) => collectSourcesFromValue(c?.web_search_call?.action?.sources, sources));
+  });
+  return Array.from(sources.values()).filter(Boolean);
+}
+
+function extractCitationsFromSummary(summary: string, sources: string[]) {
+  const matches = Array.from(summary.matchAll(/\[(\d+)\]/g));
+  const indices = Array.from(new Set(matches.map((m) => Number(m[1]))));
+  return indices.map((idx) => sources[idx - 1]).filter(Boolean);
+}
+
+async function runMarketResearch({
+  country,
+  allowedDomains,
+}: {
+  country: string;
+  allowedDomains: string[];
+}): Promise<MarketResearch | null> {
+  if (!openai?.responses?.create) return null;
+  if (!allowedDomains || allowedDomains.length === 0) return null;
+
+  const prompt = [
+    `You are performing official-only market research for ${country}.`,
+    'Only use government, regulator, system operator, or other official domains provided. Do NOT reference or infer details about any specific deal.',
+    'Produce a concise, citation-rich summary that covers: (1) grid connection process for large loads, (2) firmness/flex/non-firm mechanisms, (3) queue/milestone/expiry rules, (4) official artefacts that prove capacity reservation.',
+    'Add a short list of additional checks/questions for investors referencing official policy. Keep the entire output under 180 words.',
+    'Cite sources inline using [1], [2] etc. Ensure citations map to the sources you consulted.',
+  ].join('\n');
+
+  const response = await openai.responses
+    .create({
+      model: OPENAI_MODEL,
+      input: prompt,
+      tools: [{ type: 'web_search', filters: { allowed_domains: allowedDomains } }],
+      include: ['web_search_call.action.sources'],
+    })
+    .catch(() => null);
+
+  if (!response) return null;
+
+  const summary = extractTextFromResponse(response).trim();
+  if (!summary) return null;
+  const sources = extractSourcesFromResponse(response);
+  const citations = extractCitationsFromSummary(summary, sources);
+
+  return { summary, sources, citations };
+}
+
 export async function runDeterministicAnalysis({
   dealId,
   userId,
   organizationId,
+  includeMarketResearch = false,
 }: {
   dealId: string;
   userId: string;
   organizationId: string;
+  includeMarketResearch?: boolean;
 }) {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
@@ -199,6 +287,13 @@ export async function runDeterministicAnalysis({
   const confidence = computeEnergizationConfidence(evidence.extracted_facts, checklist.length);
   const summary = `Evidence-led view: ${scorecard.filter((s) => s.status === ScoreStatusValues.VERIFIED).length} verified, ${scorecard.filter((s) => s.status === ScoreStatusValues.UNKNOWN).length} unknown. Energization confidence: ${confidence}%`;
 
+  const countryPack = deal.fund.organization.countryPacks.find(
+    (p) => p.countryCode.toLowerCase() === deal.country.toLowerCase()
+  );
+  const marketResearch = includeMarketResearch
+    ? await runMarketResearch({ country: deal.country, allowedDomains: countryPack?.allowedDomains || [] }).catch(() => null)
+    : null;
+
   const run = await prisma.analysisRun.create({
     data: {
       dealId: deal.id,
@@ -207,6 +302,7 @@ export async function runDeterministicAnalysis({
       scorecard: scorecardSchema.parse(scorecard),
       summary,
       checklist: checklistSchema.parse(checklist),
+      marketResearch: marketResearch || undefined,
       status: 'SUCCESS',
       errorMessage: null,
       modelUsed: OPENAI_MODEL,

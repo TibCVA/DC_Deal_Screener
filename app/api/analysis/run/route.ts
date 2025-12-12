@@ -23,6 +23,7 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   const dealId = body?.dealId as string | undefined;
+  const includeMarketResearch = Boolean(body?.includeMarketResearch);
   if (!dealId) {
     return NextResponse.json({ error: 'Missing dealId' }, { status: 400 });
   }
@@ -37,7 +38,12 @@ export async function POST(req: Request) {
   }
 
   try {
-    const run = await runDeterministicAnalysis({ dealId, userId: (session.user as any).id, organizationId: membership.organizationId });
+    const run = await runDeterministicAnalysis({
+      dealId,
+      userId: (session.user as any).id,
+      organizationId: membership.organizationId,
+      includeMarketResearch,
+    });
     return NextResponse.json(run);
   } catch (err: any) {
     return NextResponse.json({ error: 'Analysis failed', detail: err.message }, { status: 500 });
