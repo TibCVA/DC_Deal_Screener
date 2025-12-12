@@ -1,0 +1,5 @@
+Grid connection confirmation
+- Voltage: 110kV
+- Reserved capacity: 24 MW
+- Energization target: Q4 2025
+- Firm service with curtailment cap 5%
