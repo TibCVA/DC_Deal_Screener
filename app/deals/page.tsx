@@ -6,8 +6,9 @@ import Link from 'next/link';
 
 export default async function DealsPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return null;
-  const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!userId) return null;
+  const membership = await prisma.membership.findFirst({ where: { userId } });
   if (!membership) return null;
   const deals = await prisma.deal.findMany({ where: { fund: { organizationId: membership.organizationId } }, include: { fund: true } });
 
@@ -18,7 +19,7 @@ export default async function DealsPage() {
           <h1 className="text-2xl font-semibold">Deals</h1>
           <p className="text-sm text-slate-500">All active opportunities in your fund.</p>
         </div>
-        {[Role.ADMIN, Role.ANALYST].includes(membership.role) && (
+        {([Role.ADMIN, Role.ANALYST] as Role[]).includes(membership.role) && (
           <Link href="/deals/new" className="btn-primary">New deal</Link>
         )}
       </div>

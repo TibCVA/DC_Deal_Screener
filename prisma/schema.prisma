@@ -24,6 +24,11 @@ enum ScoreStatus {
   UNKNOWN
 }
 
+enum AnalysisRunStatus {
+  SUCCESS
+  FAILED
+}
+
 model User {
   id          String       @id @default(uuid())
   email       String       @unique
@@ -124,11 +129,32 @@ model AnalysisRun {
   dealId        String
   executedBy    User      @relation("UserRuns", fields: [executedById], references: [id])
   executedById  String
+  status        AnalysisRunStatus @default(SUCCESS)
+  errorMessage  String?
+  modelUsed     String?
   evidence      Json
   scorecard     Json
   summary       String
   checklist     Json
   createdAt     DateTime  @default(now())
+  evidenceSnippets AnalysisEvidenceSnippet[]
+}
+
+model AnalysisEvidenceSnippet {
+  id             String   @id @default(uuid())
+  analysisRun    AnalysisRun @relation(fields: [analysisRunId], references: [id])
+  analysisRunId  String
+  snippetId      String
+  dealDocumentId String?
+  openaiFileId   String?
+  text           String
+  fileId         String?
+  fileName       String?
+  score          Float?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@unique([analysisRunId, snippetId])
 }
 
 model AuditLog {

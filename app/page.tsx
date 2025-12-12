@@ -24,12 +24,11 @@ async function getDashboardData(userId: string) {
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return (
-      <div className="rounded-xl bg-white p-6 shadow">You must be signed in.</div>
-    );
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!userId) {
+    return <div className="rounded-xl bg-white p-6 shadow">You must be signed in.</div>;
   }
-  const data = await getDashboardData((session.user as any).id);
+  const data = await getDashboardData(userId);
   if (!data) return <div className="rounded-xl bg-white p-6 shadow">No organization found.</div>;
   const { funds, membership, countryPacks } = data;
   const totalDeals = funds.reduce((acc, f) => acc + f.deals.length, 0);
@@ -44,7 +43,7 @@ export default async function DashboardPage() {
             <h1 className="text-3xl font-bold text-slate-900">DC Deal Screener</h1>
             <p className="max-w-2xl text-slate-600">Evidence-first underwriting workspace aligned to your fund thesis and country packs.</p>
           </div>
-          {[Role.ADMIN, Role.ANALYST].includes(membership.role) && (
+          {([Role.ADMIN, Role.ANALYST] as Role[]).includes(membership.role) && (
             <Link href="/deals/new" className="btn-primary">New deal</Link>
           )}
         </div>

@@ -7,8 +7,9 @@ import { Role } from '@prisma/client';
 async function saveThesis(formData: FormData, fundId: string) {
   'use server';
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) throw new Error('Unauthorized');
-  const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!userId) throw new Error('Unauthorized');
+  const membership = await prisma.membership.findFirst({ where: { userId } });
   if (!membership || membership.role !== Role.ADMIN) throw new Error('Forbidden');
   const fund = await prisma.fund.findFirst({ where: { id: fundId, organizationId: membership.organizationId } });
   if (!fund) throw new Error('Forbidden');
@@ -26,8 +27,9 @@ async function saveThesis(formData: FormData, fundId: string) {
 
 export default async function FundsPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return null;
-  const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!userId) return null;
+  const membership = await prisma.membership.findFirst({ where: { userId } });
   if (!membership) return null;
   if (membership.role !== Role.ADMIN) {
     return <div className="rounded-xl bg-white p-6 shadow">Only admins can edit fund onboarding.</div>;

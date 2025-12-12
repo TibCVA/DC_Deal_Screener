@@ -4,9 +4,10 @@ import { getServerSession } from 'next-auth';
 
 export default async function RunsPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return null;
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!userId) return null;
   const runs = await prisma.analysisRun.findMany({
-    where: { executedById: (session.user as any).id },
+    where: { executedById: userId },
     include: { deal: true },
     orderBy: { createdAt: 'desc' },
   });

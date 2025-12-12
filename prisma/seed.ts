@@ -6,9 +6,9 @@ const prisma = new PrismaClient();
 async function main() {
   const passwordHash = await hash('password123', 10);
   const org = await prisma.organization.upsert({
-    where: { name: 'Demo Infrastructure Partners' },
+    where: { id: 'org-demo' },
     update: {},
-    create: { name: 'Demo Infrastructure Partners' },
+    create: { id: 'org-demo', name: 'Demo Infrastructure Partners' },
   });
 
   const user = await prisma.user.upsert({
@@ -24,9 +24,10 @@ async function main() {
   });
 
   const fund = await prisma.fund.upsert({
-    where: { name: 'Pan-EU Digital Infra Fund' },
+    where: { id: 'fund-demo' },
     update: {},
     create: {
+      id: 'fund-demo',
       name: 'Pan-EU Digital Infra Fund',
       organizationId: org.id,
       thesis: {
@@ -41,9 +42,10 @@ async function main() {
   });
 
   await prisma.deal.upsert({
-    where: { name: 'Paris South Campus' },
+    where: { id: 'deal-demo' },
     update: {},
     create: {
+      id: 'deal-demo',
       name: 'Paris South Campus',
       country: 'FR',
       city: 'Paris',
@@ -67,9 +69,10 @@ async function main() {
 
   for (const pack of countryPacks) {
     await prisma.countryPack.upsert({
-      where: { organizationId_countryCode: { organizationId: org.id, countryCode: pack.code } },
+      where: { id: `pack-${pack.code}` },
       update: {},
       create: {
+        id: `pack-${pack.code}`,
         name: pack.name,
         countryCode: pack.code,
         organizationId: org.id,

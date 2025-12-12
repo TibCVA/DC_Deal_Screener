@@ -9,7 +9,9 @@
     "lint": "next lint",
     "prisma": "prisma",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run prisma validate && pnpm test"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -22,8 +24,8 @@
     "@types/bcryptjs": "^2.4.2",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.0",
-    "mailparser": "^3.9.1",
     "lucide-react": "^0.344.0",
+    "mailparser": "^3.9.1",
     "next": "14.1.4",
     "next-auth": "^4.24.7",
     "next-safe-action": "8.0.11",
@@ -41,6 +43,7 @@
   },
   "devDependencies": {
     "@testing-library/react": "^14.2.1",
+    "@types/mailparser": "^3.4.6",
     "@types/node": "20.11.19",
     "@types/react": "18.2.66",
     "@types/react-dom": "18.2.22",

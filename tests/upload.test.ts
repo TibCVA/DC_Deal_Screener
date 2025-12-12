@@ -15,6 +15,10 @@ const { mockDealUpdate, mockDealFindUnique, mockDealDocumentCreate, mockDealDocu
   mockDealDocumentUpdate: vi.fn(),
 }));
 
+vi.mock('mailparser', () => ({
+  simpleParser: vi.fn().mockResolvedValue({ text: '', attachments: [] }),
+}));
+
 vi.mock('next-auth', () => ({
   getServerSession: vi.fn().mockResolvedValue({ user: { id: 'user1' } }),
 }));
@@ -51,13 +55,11 @@ vi.mock('@/lib/openai', () => ({
     files: {
       create: mockFilesCreate,
     },
-    beta: {
-      vectorStores: {
-        create: (...args: any[]) => mockVectorStoreCreate(...args),
-        files: {
-          create: (...args: any[]) => mockVectorStoreFileCreate(...args),
-          retrieve: (...args: any[]) => mockRetrieve(...args),
-        },
+    vectorStores: {
+      create: (...args: any[]) => mockVectorStoreCreate(...args),
+      files: {
+        create: (...args: any[]) => mockVectorStoreFileCreate(...args),
+        retrieve: (...args: any[]) => mockRetrieve(...args),
       },
     },
   },
@@ -93,6 +95,16 @@ beforeEach(() => {
     id: 'doc-1',
     name: 'note.txt',
     path: path.join(process.cwd(), 'uploads', 'note.txt'),
+    mimeType: 'text/plain',
+    dealId: 'deal1',
+  });
+
+  mockDealDocumentUpdate.mockResolvedValue({
+    id: 'doc-1',
+    name: 'note.txt',
+    mimeType: 'text/plain',
+    dealId: 'deal1',
+    openaiStatus: 'indexed',
   });
 
   mockDealFindUnique.mockResolvedValue({

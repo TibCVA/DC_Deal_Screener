@@ -19,7 +19,7 @@ Evidence-first screening workspace for European data center deals. The app produ
    ```bash
    cp .env.example .env
    # Update DATABASE_URL, NEXTAUTH_SECRET, etc.
-   # Set OPENAI_API_KEY (server-side only) and optional OPENAI_MODEL
+   # Set OPENAI_API_KEY (server-side only) and optional OPENAI_MODEL (defaults to gpt-4o-mini)
    ```
 3. Apply the initial migration to PostgreSQL and seed demo data:
    ```bash
@@ -57,6 +57,12 @@ Evidence-first screening workspace for European data center deals. The app produ
 Run schema + integration checks:
 ```bash
 pnpm test
+```
+
+## Preflight
+Run all CI-grade checks (typecheck, lint, Prisma validate, tests):
+```bash
+pnpm check
 ```
 
 ## Deployment (DigitalOcean App Platform)

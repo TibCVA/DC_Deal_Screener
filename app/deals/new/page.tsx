@@ -8,8 +8,9 @@ import { redirect } from 'next/navigation';
 async function createDeal(formData: FormData) {
   'use server';
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) throw new Error('Unauthorized');
-  const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!userId) throw new Error('Unauthorized');
+  const membership = await prisma.membership.findFirst({ where: { userId } });
   if (!membership) throw new Error('Not authorized');
   if (membership.role === Role.VIEWER) throw new Error('Insufficient role');
   const fundId = String(formData.get('fundId'));
@@ -27,8 +28,9 @@ async function createDeal(formData: FormData) {
 
 export default async function NewDealPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return null;
-  const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!userId) return null;
+  const membership = await prisma.membership.findFirst({ where: { userId } });
   if (!membership) return null;
   const funds = await prisma.fund.findMany({ where: { organizationId: membership.organizationId } });
 

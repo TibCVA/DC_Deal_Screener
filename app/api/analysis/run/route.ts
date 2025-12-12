@@ -5,18 +5,22 @@ import { Role } from '@prisma/client';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
+  const membership = await prisma.membership.findFirst({ where: { userId } });
   if (!membership) {
     return NextResponse.json({ error: 'Membership required' }, { status: 403 });
   }
 
-  if (![Role.ADMIN, Role.ANALYST].includes(membership.role)) {
+  const allowedRoles: Role[] = [Role.ADMIN, Role.ANALYST];
+  if (!allowedRoles.includes(membership.role)) {
     return NextResponse.json({ error: 'Insufficient role to run analysis' }, { status: 403 });
   }
 
@@ -36,7 +40,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const run = await runDeterministicAnalysis({ dealId, userId: (session.user as any).id, organizationId: membership.organizationId });
+    const run = await runDeterministicAnalysis({ dealId, userId, organizationId: membership.organizationId });
     return NextResponse.json(run);
   } catch (err: any) {
     return NextResponse.json({ error: 'Analysis failed', detail: err.message }, { status: 500 });

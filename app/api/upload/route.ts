@@ -14,7 +14,7 @@ export const runtime = 'nodejs';
 
 async function ensureVectorStore(dealId: string, existing?: string) {
   if (existing) return existing;
-  const vectorStore = await openai.beta.vectorStores.create({ name: `deal-${dealId}` });
+  const vectorStore = await openai.vectorStores.create({ name: `deal-${dealId}` });
   await prisma.deal.update({ where: { id: dealId }, data: { openaiVectorStoreId: vectorStore.id } });
   return vectorStore.id;
 }
@@ -22,7 +22,7 @@ async function ensureVectorStore(dealId: string, existing?: string) {
 async function pollVectorStoreFile(vectorStoreId: string, fileAssociationId: string) {
   let delay = 1000;
   for (let attempt = 0; attempt < 8; attempt++) {
-    const status = await openai.beta.vectorStores.files.retrieve(vectorStoreId, fileAssociationId);
+    const status = await openai.vectorStores.files.retrieve(vectorStoreId, fileAssociationId);
     if (status.status === 'completed') return 'indexed';
     if (status.status === 'failed') return 'failed';
     await new Promise((resolve) => setTimeout(resolve, delay));
@@ -33,16 +33,18 @@ async function pollVectorStoreFile(vectorStoreId: string, fileAssociationId: str
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const membership = await prisma.membership.findFirst({ where: { userId: (session.user as any).id } });
+  const membership = await prisma.membership.findFirst({ where: { userId } });
   if (!membership) {
     return NextResponse.json({ error: 'Membership required' }, { status: 403 });
   }
 
-  if (![Role.ADMIN, Role.ANALYST].includes(membership.role)) {
+  const allowedRoles: Role[] = [Role.ADMIN, Role.ANALYST];
+  if (!allowedRoles.includes(membership.role)) {
     return NextResponse.json({ error: 'Insufficient role to upload documents' }, { status: 403 });
   }
 
@@ -86,10 +88,13 @@ export async function POST(req: Request) {
     let uploadPath = stored.path;
     if ((stored.ext || '').toLowerCase() === 'eml') {
       const parsed = await simpleParser(buffer);
+      const toText = Array.isArray((parsed.to as any)?.value)
+        ? ((parsed.to as any).value as any[]).map((addr) => addr?.text || '').filter(Boolean).join(', ')
+        : (parsed.to as any)?.text || '';
       const rendered = [
         `Subject: ${parsed.subject || ''}`,
         `From: ${parsed.from?.text || ''}`,
-        `To: ${parsed.to?.text || ''}`,
+        `To: ${toText}`,
         `Date: ${parsed.date ? parsed.date.toISOString() : ''}`,
         '',
         parsed.text || parsed.html || '',
@@ -105,14 +110,24 @@ export async function POST(req: Request) {
 
     await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiFileId: openaiFile.id, openaiStatus: 'uploaded' } });
 
-    const vectorStoreFile = await openai.beta.vectorStores.files.create(vectorStoreId, { file_id: openaiFile.id });
+    const vectorStoreFile = await openai.vectorStores.files.create(vectorStoreId, { file_id: openaiFile.id });
     const openaiStatus = await pollVectorStoreFile(vectorStoreId, vectorStoreFile.id);
-    await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiStatus } });
+    const updated = await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiStatus } });
 
-    return NextResponse.json({ id: document.id, openaiStatus });
+    return NextResponse.json({
+      id: updated.id,
+      name: updated.name,
+      mimeType: updated.mimeType,
+      openaiStatus,
+      dealId: updated.dealId,
+      openaiFileId: updated.openaiFileId,
+    });
   } catch (error) {
     console.error('OpenAI ingestion failed', error);
-    await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiStatus: 'failed' } });
-    return NextResponse.json({ id: document.id, openaiStatus: 'failed', error: 'Upload failed' }, { status: 500 });
+    const failedDoc = await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiStatus: 'failed' } });
+    return NextResponse.json(
+      { id: failedDoc.id, name: failedDoc.name, mimeType: failedDoc.mimeType, openaiStatus: 'failed', error: 'Upload failed' },
+      { status: 500 }
+    );
   }
 }
