@@ -1,5 +1,6 @@
 'use client';
 
+import MarketContextSection, { MarketResearchPayload } from '@/components/MarketContextSection';
 import { AnalysisEvidenceSnippet, AnalysisRun, AnalysisRunStatus, Deal, DealDocument, Role } from '@prisma/client';
 import { useMemo, useState, useTransition } from 'react';
 
@@ -9,6 +10,7 @@ type AnalysisWithEvidence =
     errorMessage: string | null;
     modelUsed: string | null;
     evidenceSnippets: AnalysisEvidenceSnippet[];
+    marketResearchIncluded?: boolean;
   };
 
 export default function DealWorkspace({ deal, role }: { deal: Deal & { documents: DealDocument[]; analyses: AnalysisWithEvidence[] }; role: Role; }) {
@@ -82,9 +84,8 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
     return Object.fromEntries(activeRun.evidenceSnippets.map((s) => [s.snippetId, s]));
   }, [activeRun]);
 
-  const marketResearch = (activeRun as any)?.marketResearch as
-    | { summary?: string; citations?: string[]; sources?: string[] }
-    | undefined;
+  const marketResearch = (activeRun as any)?.marketResearch as MarketResearchPayload | undefined;
+  const marketResearchIncluded = Boolean((activeRun as any)?.marketResearchIncluded);
 
   function renderRunStatus(status?: string) {
     const normalized = (status || 'SUCCESS').toLowerCase();
@@ -251,50 +252,7 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
         </div>
       )}
 
-      {activeRun && (
-        <div className="card p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-semibold">Market context</h3>
-              <p className="text-xs text-slate-500">Official-only guidance with citations.</p>
-            </div>
-          </div>
-          {marketResearch?.summary ? (
-            <div className="mt-3 space-y-3 text-sm text-slate-700">
-              <p className="whitespace-pre-wrap">{marketResearch.summary}</p>
-              {marketResearch.citations && marketResearch.citations.length > 0 && (
-                <div className="space-y-1 text-xs text-brand">
-                  <p className="font-semibold text-slate-900">Citations</p>
-                  <div className="flex flex-wrap gap-2">
-                    {marketResearch.citations.map((c) => (
-                      <a key={c} href={c} target="_blank" rel="noreferrer" className="underline">
-                        {c}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="space-y-1 text-xs text-slate-600">
-                <p className="font-semibold text-slate-900">Sources consulted</p>
-                <ul className="list-disc space-y-1 pl-4">
-                  {(marketResearch.sources || []).map((s) => (
-                    <li key={s}>
-                      <a href={s} target="_blank" rel="noreferrer" className="text-brand underline">
-                        {s}
-                      </a>
-                    </li>
-                  ))}
-                  {(marketResearch.sources || []).length === 0 && <li className="list-none text-slate-500">None listed.</li>}
-                </ul>
-              </div>
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-slate-500">
-              Market research was not requested or no official domains were available for this country.
-            </p>
-          )}
-        </div>
-      )}
+      {activeRun && <MarketContextSection research={marketResearch} included={marketResearchIncluded} />}
 
       <div className="card p-4">
         <div className="flex items-center justify-between">

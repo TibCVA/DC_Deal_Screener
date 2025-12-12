@@ -134,6 +134,7 @@ model AnalysisRun {
   summary       String
   checklist     Json
   marketResearch Json?
+  marketResearchIncluded Boolean @default(false)
   status        AnalysisRunStatus @default(SUCCESS)
   errorMessage  String?
   modelUsed     String?

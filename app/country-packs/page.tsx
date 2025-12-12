@@ -1,8 +1,10 @@
 import { authOptions } from '@/lib/auth';
+import { sanitizeAllowedDomainsInput } from '@/lib/allowedDomains';
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { getServerSession } from 'next-auth';
 import { Role } from '@prisma/client';
+import AllowedDomainsField from '@/components/AllowedDomainsField';
 
 async function saveCountryPack(formData: FormData, packId: string) {
   'use server';
@@ -12,23 +14,19 @@ async function saveCountryPack(formData: FormData, packId: string) {
   if (!membership || membership.role !== Role.ADMIN) throw new Error('Forbidden');
   const pack = await prisma.countryPack.findFirst({ where: { id: packId, organizationId: membership.organizationId } });
   if (!pack) throw new Error('Forbidden');
-  const allowedDomains = String(formData.get('allowedDomains') || '')
-    .split(',')
-    .map((d) => d.trim())
-    .filter(Boolean);
-  if (allowedDomains.length > 100) {
+  const { sanitized, invalid, tooMany } = sanitizeAllowedDomainsInput(String(formData.get('allowedDomains') || ''));
+  if (tooMany) {
     throw new Error('You can only specify up to 100 allowed domains.');
   }
-  const invalid = allowedDomains.find((d) => d.includes('://'));
-  if (invalid) {
-    throw new Error('Allowed domains must exclude http/https prefixes.');
+  if (invalid.length > 0) {
+    throw new Error(`Invalid domain entries: ${invalid.join(', ')}`);
   }
   const goldSources = String(formData.get('goldSources'));
   const artefacts = String(formData.get('artefacts'));
   await prisma.countryPack.update({
     where: { id: packId },
     data: {
-      allowedDomains,
+      allowedDomains: sanitized,
       goldSources: { description: goldSources },
       artefacts: { description: artefacts },
     },
@@ -62,10 +60,7 @@ export default async function CountryPacksPage() {
             <button type="submit" className="btn-primary">Save</button>
           </div>
           <div className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-sm text-slate-600">Official allowed domains for web search</label>
-              <textarea name="allowedDomains" defaultValue={pack.allowedDomains.join(', ')} className="w-full" rows={2}></textarea>
-            </div>
+            <AllowedDomainsField defaultValue={pack.allowedDomains.join('\n')} />
             <div className="space-y-1">
               <label className="text-sm text-slate-600">Gold sources</label>
               <textarea name="goldSources" defaultValue={(pack.goldSources as any)?.description || ''} className="w-full" rows={3}></textarea>

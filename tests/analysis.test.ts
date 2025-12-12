@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import React from 'react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const snippetText = vi.hoisted(() => 'Grid connection reserved 24 MW at 110kV, firm, energization Q4 2025.');
 
@@ -78,8 +80,15 @@ vi.mock('../lib/prisma', () => {
 
 import { runDeterministicAnalysis, evidenceSchema, computeEnergizationConfidence, ScoreStatusValues, createSnippetId } from '../lib/analysis';
 import { openai } from '../lib/openai';
+import MarketContextSection from '../components/MarketContextSection';
+import { prisma } from '../lib/prisma';
 
 describe('analysis engine', () => {
+  beforeEach(() => {
+    (openai as any).responses.parse.mockReset();
+    (openai as any).responses.create.mockReset();
+  });
+
   it('validates evidence schema', () => {
     const parsed = evidenceSchema.parse({
       extracted_facts: {
@@ -119,7 +128,7 @@ describe('analysis engine', () => {
     expect(run.scorecard).toBeDefined();
     const scorecard = run.scorecard as any[];
     expect(scorecard.find((s) => s.criterion === 'Power reservation')?.status).toBe(ScoreStatusValues.VERIFIED);
-    const confidence = computeEnergizationConfidence(evidence.extracted_facts, (run.checklist as any[]).length);
+    const confidence = computeEnergizationConfidence(evidence.extracted_facts, run.checklist as any[]);
     expect(confidence).toBeGreaterThan(10);
     expect((run as any).evidenceSnippets?.length).toBeGreaterThan(0);
   });
@@ -156,5 +165,103 @@ describe('analysis engine', () => {
     expect(research.summary).toContain('Official grid process');
     expect(research.sources).toContain('https://grid.gouv.fr/process');
     expect(research.citations).toContain('https://grid.gouv.fr/process');
+  });
+
+  it('keeps scorecards deterministic while adding only official context payloads', async () => {
+    const snippetId = createSnippetId('file-1', snippetText);
+    const parsedFacts = {
+      extracted_facts: {
+        reserved_mw: { value: 24, citations: [snippetId] },
+        voltage_kv: { value: 110, citations: [snippetId] },
+        energization_target: { value: 'Q4 2025', citations: [snippetId] },
+        firmness_type: { value: 'firm', citations: [snippetId] },
+        curtailment_cap: { value: null, citations: [] },
+        grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
+        permits_status: { value: 'Permit granted', citations: [snippetId] },
+        customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
+      },
+      checks: [],
+    };
+    (openai as any).responses.parse.mockResolvedValue(parsedFacts);
+    (openai as any).responses.create.mockResolvedValue({
+      output_text: 'Official grid process summary [1]',
+      web_search_call: { action: { sources: ['https://grid.gouv.fr/process'] } },
+    });
+
+    const baseline = await runDeterministicAnalysis({ dealId: 'deal1', userId: 'user1', organizationId: 'org1' });
+    const withResearch = await runDeterministicAnalysis({
+      dealId: 'deal1',
+      userId: 'user1',
+      organizationId: 'org1',
+      includeMarketResearch: true,
+    });
+
+    expect((withResearch as any).marketResearchIncluded).toBe(true);
+    expect((withResearch as any).scorecard).toEqual(baseline.scorecard);
+    expect((withResearch as any).evidence.extracted_facts).toEqual((baseline as any).evidence.extracted_facts);
+    const contextualOnly = (withResearch as any).checklist.filter((c: any) => c.contextual);
+    expect(contextualOnly.length === 0 || contextualOnly.every((c: any) => c.contextual === true)).toBe(true);
+  });
+
+  it('skips market research when allowed domains are empty and surfaces guidance', async () => {
+    const snippetId = createSnippetId('file-1', snippetText);
+    (openai as any).responses.parse.mockResolvedValue({
+      extracted_facts: {
+        reserved_mw: { value: 24, citations: [snippetId] },
+        voltage_kv: { value: 110, citations: [snippetId] },
+        energization_target: { value: 'Q4 2025', citations: [snippetId] },
+        firmness_type: { value: 'firm', citations: [snippetId] },
+        curtailment_cap: { value: null, citations: [] },
+        grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
+        permits_status: { value: 'Permit granted', citations: [snippetId] },
+        customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
+      },
+      checks: [],
+    });
+
+    (prisma as any).deal.findUnique.mockResolvedValueOnce({
+      id: 'deal1',
+      name: 'Paris South Campus',
+      country: 'FR',
+      city: 'Paris',
+      productType: 'Hyperscale',
+      type: 'GREENFIELD',
+      fundId: 'fund1',
+      documents: [],
+      fund: {
+        organizationId: 'org1',
+        organization: { countryPacks: [{ id: 'pack1', countryCode: 'FR', allowedDomains: [] }] },
+      },
+      openaiVectorStoreId: 'vs-123',
+    });
+
+    const run = await runDeterministicAnalysis({
+      dealId: 'deal1',
+      userId: 'user1',
+      organizationId: 'org1',
+      includeMarketResearch: true,
+    });
+
+    expect((openai as any).responses.create).not.toHaveBeenCalled();
+    expect((run as any).marketResearch?.status).toBe('SKIPPED');
+    const contextual = (run as any).checklist.filter((c: any) => c.contextual);
+    expect(contextual.some((c: any) => (c.question as string).includes('allowed domains'))).toBe(true);
+  });
+
+  it('renders clickable citations for market research output', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(MarketContextSection, {
+        included: true,
+        research: {
+          status: 'COMPLETED',
+          summary: 'Grid policy explained [1]',
+          citations: ['grid.gouv.fr/process'],
+          sources: ['grid.gouv.fr/process'],
+        },
+      })
+    );
+
+    expect(markup).toContain('href="https://grid.gouv.fr/process"');
+    expect(markup).toContain('Market context is derived from official sources');
   });
 });
