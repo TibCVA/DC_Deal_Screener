@@ -1,16 +1,21 @@
 'use client';
 
-import { AnalysisRun, Deal, DealDocument } from '@prisma/client';
+import { AnalysisRun, Deal, DealDocument, Role } from '@prisma/client';
 import { useState, useTransition } from 'react';
 
-export default function DealWorkspace({ deal, userId }: { deal: Deal & { documents: DealDocument[]; analyses: AnalysisRun[] }; userId: string; }) {
+export default function DealWorkspace({ deal, role }: { deal: Deal & { documents: DealDocument[]; analyses: AnalysisRun[] }; role: Role; }) {
   const [analyses, setAnalyses] = useState(deal.analyses);
   const [uploading, setUploading] = useState(false);
   const [running, startTransition] = useTransition();
   const [message, setMessage] = useState('');
+  const canEdit = role === Role.ADMIN || role === Role.ANALYST;
 
   async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!canEdit) {
+      setMessage('You do not have permission to upload documents.');
+      return;
+    }
     const formData = new FormData(e.currentTarget);
     formData.append('dealId', deal.id);
     setUploading(true);
@@ -19,23 +24,29 @@ export default function DealWorkspace({ deal, userId }: { deal: Deal & { documen
     if (res.ok) {
       setMessage('File uploaded. Refresh to see it listed.');
     } else {
-      setMessage('Upload failed');
+      const body = await res.json().catch(() => ({}));
+      setMessage(body.error || 'Upload failed');
     }
   }
 
   async function runAnalysis() {
+    if (!canEdit) {
+      setMessage('You do not have permission to run analysis.');
+      return;
+    }
     startTransition(async () => {
       const res = await fetch('/api/analysis/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dealId: deal.id, userId }),
+        body: JSON.stringify({ dealId: deal.id }),
       });
       if (res.ok) {
         const data = await res.json();
         setAnalyses((prev) => [data, ...prev]);
         setMessage('Analysis completed');
       } else {
-        setMessage('Analysis failed');
+        const body = await res.json().catch(() => ({}));
+        setMessage(body.error || 'Analysis failed');
       }
     });
   }
@@ -50,7 +61,7 @@ export default function DealWorkspace({ deal, userId }: { deal: Deal & { documen
           <h1 className="text-2xl font-semibold">{deal.name}</h1>
           <p className="text-sm text-slate-500">{deal.productType}</p>
         </div>
-        <button onClick={runAnalysis} className="btn-primary" disabled={running}>
+        <button onClick={runAnalysis} className="btn-primary" disabled={running || !canEdit}>
           {running ? 'Running…' : 'Run analysis'}
         </button>
       </div>
@@ -59,10 +70,14 @@ export default function DealWorkspace({ deal, userId }: { deal: Deal & { documen
         <div className="card p-4 lg:col-span-2">
           <h2 className="font-semibold">Evidence binder</h2>
           <p className="text-sm text-slate-500">Upload dataroom docs and emails. Stored privately.</p>
-          <form onSubmit={handleUpload} className="mt-3 flex items-center gap-3" encType="multipart/form-data">
-            <input type="file" name="file" className="flex-1" required />
-            <button type="submit" className="btn-primary" disabled={uploading}>{uploading ? 'Uploading…' : 'Upload'}</button>
-          </form>
+          {canEdit ? (
+            <form onSubmit={handleUpload} className="mt-3 flex items-center gap-3" encType="multipart/form-data">
+              <input type="file" name="file" className="flex-1" required />
+              <button type="submit" className="btn-primary" disabled={uploading}>{uploading ? 'Uploading…' : 'Upload'}</button>
+            </form>
+          ) : (
+            <p className="mt-3 text-sm text-slate-500">View-only access. Uploads disabled.</p>
+          )}
           <ul className="mt-4 space-y-2 text-sm text-slate-700">
             {deal.documents.map((doc) => (
               <li key={doc.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">

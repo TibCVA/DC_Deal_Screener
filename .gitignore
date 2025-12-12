@@ -4,7 +4,6 @@ node_modules
 .env.local
 uploads
 prisma/dev.db
-pnpm-lock.yaml
 
 # testing artifacts
 coverage

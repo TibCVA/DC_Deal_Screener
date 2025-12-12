@@ -67,7 +67,7 @@ async function main() {
 
   for (const pack of countryPacks) {
     await prisma.countryPack.upsert({
-      where: { countryCode: pack.code },
+      where: { organizationId_countryCode: { organizationId: org.id, countryCode: pack.code } },
       update: {},
       create: {
         name: pack.name,

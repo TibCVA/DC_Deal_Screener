@@ -53,7 +53,7 @@ describe('analysis engine', () => {
   });
 
   it('runs deterministic analysis with fixture document', async () => {
-    const run = await runDeterministicAnalysis({ dealId: 'deal1', userId: 'user1' });
+    const run = await runDeterministicAnalysis({ dealId: 'deal1', userId: 'user1', organizationId: 'org1' });
     const evidence = run.evidence as any;
     expect(evidence.reservedMw).toContain('MW');
     expect(run.scorecard).toBeDefined();
