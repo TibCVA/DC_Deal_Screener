@@ -24,6 +24,11 @@ enum ScoreStatus {
   UNKNOWN
 }
 
+enum AnalysisRunStatus {
+  SUCCESS
+  FAILED
+}
+
 model User {
   id          String       @id @default(uuid())
   email       String       @unique
@@ -128,6 +133,9 @@ model AnalysisRun {
   scorecard     Json
   summary       String
   checklist     Json
+  status        AnalysisRunStatus @default(SUCCESS)
+  errorMessage  String?
+  modelUsed     String?
   createdAt     DateTime  @default(now())
   evidenceSnippets AnalysisEvidenceSnippet[]
 }
@@ -139,9 +147,14 @@ model AnalysisEvidenceSnippet {
   snippetId      String
   text           String
   fileId         String?
+  openaiFileId   String?
+  openaiDocumentId String?
+  openaiVectorStoreId String?
   fileName       String?
   score          Float?
   createdAt      DateTime @default(now())
+
+  metadata       Json?
 
   @@unique([analysisRunId, snippetId])
 }
