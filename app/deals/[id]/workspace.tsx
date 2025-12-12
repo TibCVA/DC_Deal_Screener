@@ -22,6 +22,7 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
   const [binderTab, setBinderTab] = useState<'uploads' | 'evidence'>('uploads');
   const [selectedSnippet, setSelectedSnippet] = useState<AnalysisEvidenceSnippet | null>(null);
   const [includeMarketResearch, setIncludeMarketResearch] = useState(false);
+  const [purging, setPurging] = useState(false);
   const canEdit = role === Role.ADMIN || role === Role.ANALYST;
 
   function renderStatusBadge(status?: string) {
@@ -76,6 +77,22 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
         setMessage(body.error || 'Analysis failed');
       }
     });
+  }
+
+  async function handlePurge() {
+    if (!canEdit || role !== Role.ADMIN) {
+      setMessage('Only admins can purge deals.');
+      return;
+    }
+    if (!confirm('This will permanently delete the deal, data room files, and AI artifacts. Continue?')) return;
+    setPurging(true);
+    const res = await fetch(`/api/deals/${deal.id}/purge`, { method: 'POST' });
+    setPurging(false);
+    if (!res.ok) {
+      setMessage('Purge failed.');
+      return;
+    }
+    window.location.href = '/deals';
   }
 
   const activeRun = useMemo(() => analyses.find((a) => a.id === activeRunId) || analyses[0], [analyses, activeRunId]);
@@ -133,6 +150,15 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
             <button onClick={runAnalysis} className="btn-primary" disabled={running || !canEdit}>
               {running ? 'Running…' : 'Run analysis'}
             </button>
+            {role === Role.ADMIN && (
+              <button
+                onClick={handlePurge}
+                className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50"
+                disabled={purging}
+              >
+                {purging ? 'Purging…' : 'Delete deal'}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -177,7 +203,17 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
                       <span>{doc.name}</span>
                       {renderStatusBadge(doc.openaiStatus)}
                     </div>
-                    <span className="text-xs text-slate-500">{doc.mimeType}</span>
+                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                      <span>{doc.mimeType}</span>
+                      <a
+                        className="text-brand underline"
+                        href={`/api/documents/${doc.id}/download`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Download
+                      </a>
+                    </div>
                   </li>
                 ))}
                 {deal.documents.length === 0 && <p className="text-sm text-slate-500">No documents yet.</p>}

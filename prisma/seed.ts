@@ -4,7 +4,13 @@ import { hash } from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await hash('password123', 10);
+  if (process.env.DEMO_SEED !== '1') {
+    console.log('DEMO_SEED not set; skipping demo seed to avoid populating production data.');
+    return;
+  }
+
+  const password = process.env.DEMO_ADMIN_PASSWORD || 'password123';
+  const passwordHash = await hash(password, 10);
   const org = await prisma.organization.upsert({
     where: { id: 'demo-org' },
     update: {},
@@ -75,7 +81,7 @@ async function main() {
         name: pack.name,
         countryCode: pack.code,
         organizationId: org.id,
-        allowedDomains: ['*.tsotransmission.example', '*.gov', '*.eu'],
+        allowedDomains: ['*.gov', '*.eu'],
         goldSources: { label: 'Official TSO queue and energy regulator publications', note: 'Replace with verified URLs' },
         artefacts: {
           capacity: 'Signed reservation letter or grid contract with MW and voltage',
@@ -86,7 +92,7 @@ async function main() {
     });
   }
 
-  console.log('Seed completed');
+  console.log('Demo seed completed');
 }
 
 main()

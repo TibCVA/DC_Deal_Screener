@@ -26,16 +26,16 @@ export default function LoginPage() {
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         <div className="space-y-1">
           <label className="text-sm text-slate-600">Email</label>
-          <input name="email" type="email" required className="w-full" defaultValue="admin@example.com" />
+          <input name="email" type="email" required className="w-full" />
         </div>
         <div className="space-y-1">
           <label className="text-sm text-slate-600">Password</label>
-          <input name="password" type="password" required className="w-full" defaultValue="password123" />
+          <input name="password" type="password" required className="w-full" />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <button type="submit" className="btn-primary w-full">Sign in</button>
       </form>
-      <p className="mt-3 text-xs text-slate-500">Seed user: admin@example.com / password123</p>
+      <p className="mt-3 text-xs text-slate-500">Contact your admin if you need access.</p>
     </div>
   );
 }

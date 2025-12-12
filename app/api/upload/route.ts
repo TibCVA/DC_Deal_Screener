@@ -1,14 +1,14 @@
 import { prisma } from '@/lib/prisma';
-import { saveLocalFile } from '@/lib/storage';
+import { deleteStoredFile, saveFile } from '@/lib/storage';
 import { authOptions } from '@/lib/auth';
 import { openai } from '@/lib/openai';
 import { Role } from '@prisma/client';
 import crypto from 'crypto';
-import fs from 'fs';
 import { simpleParser } from 'mailparser';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import path from 'path';
+import { toFile } from 'openai/uploads';
 
 export const runtime = 'nodejs';
 
@@ -16,7 +16,10 @@ const openaiClient = openai as any;
 
 async function ensureVectorStore(dealId: string, existing?: string) {
   if (existing) return existing;
-  const vectorStore = await openaiClient.beta.vectorStores.create({ name: `deal-${dealId}` });
+  const vectorStore = await openaiClient.vectorStores.create({
+    name: `deal-${dealId}`,
+    expires_after: { anchor: 'last_active_at', days: 30 },
+  });
   await prisma.deal.update({ where: { id: dealId }, data: { openaiVectorStoreId: vectorStore.id } });
   return vectorStore.id;
 }
@@ -24,7 +27,7 @@ async function ensureVectorStore(dealId: string, existing?: string) {
 async function pollVectorStoreFile(vectorStoreId: string, fileAssociationId: string) {
   let delay = 1000;
   for (let attempt = 0; attempt < 8; attempt++) {
-    const status = await openaiClient.beta.vectorStores.files.retrieve(vectorStoreId, fileAssociationId);
+    const status = await openaiClient.vectorStores.files.retrieve(vectorStoreId, fileAssociationId);
     if (status.status === 'completed') return 'indexed';
     if (status.status === 'failed') return 'failed';
     await new Promise((resolve) => setTimeout(resolve, delay));
@@ -60,6 +63,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Missing dealId or file' }, { status: 400 });
   }
 
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const maxSize = 50 * 1024 * 1024;
+  if (buffer.length > maxSize) {
+    return NextResponse.json({ error: 'File too large. Max 50MB.' }, { status: 400 });
+  }
+  const allowedExts = ['pdf', 'doc', 'docx', 'txt', 'eml'];
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (!allowedExts.includes(ext)) {
+    return NextResponse.json({ error: 'Unsupported file type. Allowed: pdf, doc, docx, txt, eml.' }, { status: 400 });
+  }
+
   const deal = await prisma.deal.findUnique({ where: { id: dealId }, include: { fund: true } });
   if (!deal) {
     return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
@@ -68,9 +82,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Forbidden: deal not in your organization' }, { status: 403 });
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
-  const stored = await saveLocalFile(file, buffer);
+  const stored = await saveFile(file, buffer);
   const document = await prisma.dealDocument.create({
     data: {
       dealId,
@@ -86,7 +99,9 @@ export async function POST(req: Request) {
   try {
     let vectorStoreId = await ensureVectorStore(dealId, deal.openaiVectorStoreId || undefined);
 
-    let uploadPath = stored.path;
+    let ingestBuffer = buffer;
+    let ingestName = file.name;
+    let ingestMime = file.type || 'application/octet-stream';
     if ((stored.ext || '').toLowerCase() === 'eml') {
       const parsed = await simpleParser(buffer);
       const rendered = [
@@ -97,18 +112,19 @@ export async function POST(req: Request) {
         '',
         parsed.text || parsed.html || '',
       ].join('\n');
-      uploadPath = path.join(path.dirname(stored.path), `${path.parse(stored.path).name}.txt`);
-      fs.writeFileSync(uploadPath, rendered);
+      ingestBuffer = Buffer.from(rendered);
+      ingestName = `${path.parse(file.name).name}.txt`;
+      ingestMime = 'text/plain';
     }
 
     const openaiFile = await openaiClient.files.create({
-      file: fs.createReadStream(uploadPath),
+      file: await toFile(ingestBuffer, ingestName, { type: ingestMime }),
       purpose: 'assistants',
     });
 
     await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiFileId: openaiFile.id, openaiStatus: 'uploaded' } });
 
-    const vectorStoreFile = await openaiClient.beta.vectorStores.files.create(vectorStoreId, { file_id: openaiFile.id });
+    const vectorStoreFile = await openaiClient.vectorStores.files.create(vectorStoreId, { file_id: openaiFile.id });
     const openaiStatus = await pollVectorStoreFile(vectorStoreId, vectorStoreFile.id);
     await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiStatus } });
 
@@ -116,6 +132,7 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error('OpenAI ingestion failed', error);
     await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiStatus: 'failed' } });
+    await deleteStoredFile(stored.path);
     return NextResponse.json({ id: document.id, openaiStatus: 'failed', error: 'Upload failed' }, { status: 500 });
   }
 }

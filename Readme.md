@@ -10,7 +10,7 @@ Evidence-first screening workspace for European data center deals. The app produ
 - Local file storage by default (DigitalOcean Spaces ready via envs)
 - Deterministic analysis engine (no hallucinations; UNKNOWN when evidence is missing)
 
-## Getting started
+## Getting started (development)
 1. Install dependencies:
    ```bash
    pnpm install
@@ -18,19 +18,21 @@ Evidence-first screening workspace for European data center deals. The app produ
 2. Copy env template and edit values:
    ```bash
    cp .env.example .env
-   # Update DATABASE_URL, NEXTAUTH_SECRET, etc.
-   # Set OPENAI_API_KEY (server-side only) and optional OPENAI_MODEL
+   # Update DATABASE_URL, NEXTAUTH_SECRET, OPENAI_API_KEY, etc.
    ```
-3. Apply the initial migration to PostgreSQL and seed demo data:
+3. Apply migrations:
    ```bash
-   pnpm prisma migrate deploy
-   pnpm prisma db seed
+   pnpm prisma migrate dev
    ```
-4. Run the app:
+4. (Optional) load demo data for local testing only:
+   ```bash
+   pnpm seed:demo
+   ```
+5. Run the app:
    ```bash
    pnpm dev
    ```
-5. Sign in with the seeded analyst account: `admin@example.com` / `password123`.
+6. On a fresh database, create the first admin either via the CLI (`pnpm bootstrap:admin` with BOOTSTRAP_* envs set) or by visiting `/onboarding` (only available when no users exist).
 
 ## Security
 - Authentication and authorization are derived from the server-side NextAuth session; the client should never send `userId` to APIs or server actions.
@@ -51,13 +53,30 @@ Evidence-first screening workspace for European data center deals. The app produ
 
 ## Storage
 - Local: files saved under `STORAGE_ROOT` (default `./uploads`).
-- DigitalOcean Spaces: set `SPACES_ENDPOINT`, `SPACES_ACCESS_KEY`, `SPACES_SECRET_KEY`, `SPACES_BUCKET` and swap the storage helper to push to Spaces (kept server-side; never exposed to the browser).
+- DigitalOcean Spaces (recommended for production): set `SPACES_ENDPOINT`, `SPACES_REGION`, `SPACES_ACCESS_KEY`, `SPACES_SECRET_KEY`, `SPACES_BUCKET`. When these are present, uploads stream directly to Spaces and downloads stream back via the protected route.
+
+## Production deployment (DigitalOcean App Platform)
+1. Provision PostgreSQL and a Spaces bucket; set all env vars from `.env.example` (including `SPACES_*`).
+2. Bootstrap the first admin once the database is empty using `pnpm bootstrap:admin` (set BOOTSTRAP_EMAIL, BOOTSTRAP_PASSWORD, BOOTSTRAP_ORG_NAME) or navigate to `/onboarding` before any users exist.
+3. Build command:
+   ```bash
+   pnpm install --frozen-lockfile && pnpm prisma migrate deploy && pnpm build
+   ```
+4. Run command:
+   ```bash
+   pnpm start
+   ```
+5. Do **not** run `prisma db seed` in production unless you intentionally want the demo data.
 
 ## Tests
-Run schema + integration checks:
-```bash
-pnpm test
-```
+- Unit/type/lint suite:
+  ```bash
+  pnpm check
+  ```
+- Optional OpenAI smoke test (requires OPENAI_API_KEY and `RUN_INTEGRATION_TESTS=1`):
+  ```bash
+  pnpm smoke:openai
+  ```
 
 ## IC Pack PDF export
 - Open a deal workspace, select a run, and click **Download IC Pack (PDF)**. The download is authorized server-side (organization members only, including Viewers).
@@ -69,11 +88,3 @@ pnpm test
 3. Confirm the PDF downloads with the correct filename and opens with readable layout, scorecard, checklist, and appendix sections.
 4. Verify evidence snippets list snippet IDs, file names, scores, and metadata; market context contains the disclaimer and plain-text URLs.
 5. Sign in as a Viewer from another organization and confirm the download is blocked with 403.
-
-## Deployment (DigitalOcean App Platform)
-1. Provision PostgreSQL in DigitalOcean; grab the connection string for `DATABASE_URL`.
-2. Create a Spaces bucket and set the storage env vars.
-3. Set `NEXTAUTH_SECRET` to a strong random string.
-4. Build command: `pnpm install --frozen-lockfile && pnpm prisma migrate deploy && pnpm prisma db seed && pnpm build`
-5. Run command: `pnpm start`
-6. Ensure `STORAGE_ROOT` points to a writable path (or use Spaces envs to offload storage).
