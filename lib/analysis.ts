@@ -89,13 +89,14 @@ export function createSnippetId(fileId: string | undefined, text: string) {
 }
 
 async function retrieveEvidenceSnippets(vectorStoreId?: string): Promise<EvidenceSnippet[]> {
-  if (!vectorStoreId || !openai?.beta?.vectorStores?.search) return [];
+  const openaiClient = openai as any;
+  if (!vectorStoreId || !openaiClient?.beta?.vectorStores?.search) return [];
 
   const collected: EvidenceSnippet[] = [];
   const seen = new Set<string>();
 
   for (const query of RETRIEVAL_QUERIES) {
-    const search = await openai.beta.vectorStores.search({
+    const search = await openaiClient.beta.vectorStores.search({
       vector_store_id: vectorStoreId,
       query,
       limit: 5,

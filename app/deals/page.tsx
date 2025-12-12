@@ -18,7 +18,7 @@ export default async function DealsPage() {
           <h1 className="text-2xl font-semibold">Deals</h1>
           <p className="text-sm text-slate-500">All active opportunities in your fund.</p>
         </div>
-        {[Role.ADMIN, Role.ANALYST].includes(membership.role) && (
+        {([Role.ADMIN, Role.ANALYST] as Role[]).includes(membership.role) && (
           <Link href="/deals/new" className="btn-primary">New deal</Link>
         )}
       </div>

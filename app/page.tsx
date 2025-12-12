@@ -44,7 +44,7 @@ export default async function DashboardPage() {
             <h1 className="text-3xl font-bold text-slate-900">DC Deal Screener</h1>
             <p className="max-w-2xl text-slate-600">Evidence-first underwriting workspace aligned to your fund thesis and country packs.</p>
           </div>
-          {[Role.ADMIN, Role.ANALYST].includes(membership.role) && (
+          {([Role.ADMIN, Role.ANALYST] as Role[]).includes(membership.role) && (
             <Link href="/deals/new" className="btn-primary">New deal</Link>
           )}
         </div>

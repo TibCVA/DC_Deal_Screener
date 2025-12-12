@@ -1,9 +1,15 @@
 'use client';
 
-import { AnalysisEvidenceSnippet, AnalysisRun, Deal, DealDocument, Role } from '@prisma/client';
+import { AnalysisEvidenceSnippet, AnalysisRun, AnalysisRunStatus, Deal, DealDocument, Role } from '@prisma/client';
 import { useMemo, useState, useTransition } from 'react';
 
-type AnalysisWithEvidence = AnalysisRun & { evidenceSnippets: AnalysisEvidenceSnippet[] };
+type AnalysisWithEvidence =
+  Omit<AnalysisRun, 'status' | 'errorMessage' | 'modelUsed'> & {
+    status: AnalysisRunStatus;
+    errorMessage: string | null;
+    modelUsed: string | null;
+    evidenceSnippets: AnalysisEvidenceSnippet[];
+  };
 
 export default function DealWorkspace({ deal, role }: { deal: Deal & { documents: DealDocument[]; analyses: AnalysisWithEvidence[] }; role: Role; }) {
   const [analyses, setAnalyses] = useState<AnalysisWithEvidence[]>(deal.analyses);

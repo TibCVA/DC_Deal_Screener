@@ -12,9 +12,11 @@ import path from 'path';
 
 export const runtime = 'nodejs';
 
+const openaiClient = openai as any;
+
 async function ensureVectorStore(dealId: string, existing?: string) {
   if (existing) return existing;
-  const vectorStore = await openai.beta.vectorStores.create({ name: `deal-${dealId}` });
+  const vectorStore = await openaiClient.beta.vectorStores.create({ name: `deal-${dealId}` });
   await prisma.deal.update({ where: { id: dealId }, data: { openaiVectorStoreId: vectorStore.id } });
   return vectorStore.id;
 }
@@ -22,7 +24,7 @@ async function ensureVectorStore(dealId: string, existing?: string) {
 async function pollVectorStoreFile(vectorStoreId: string, fileAssociationId: string) {
   let delay = 1000;
   for (let attempt = 0; attempt < 8; attempt++) {
-    const status = await openai.beta.vectorStores.files.retrieve(vectorStoreId, fileAssociationId);
+    const status = await openaiClient.beta.vectorStores.files.retrieve(vectorStoreId, fileAssociationId);
     if (status.status === 'completed') return 'indexed';
     if (status.status === 'failed') return 'failed';
     await new Promise((resolve) => setTimeout(resolve, delay));
@@ -42,7 +44,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Membership required' }, { status: 403 });
   }
 
-  if (![Role.ADMIN, Role.ANALYST].includes(membership.role)) {
+  const privilegedRoles: Role[] = [Role.ADMIN, Role.ANALYST];
+  if (!privilegedRoles.includes(membership.role)) {
     return NextResponse.json({ error: 'Insufficient role to upload documents' }, { status: 403 });
   }
 
@@ -98,14 +101,14 @@ export async function POST(req: Request) {
       fs.writeFileSync(uploadPath, rendered);
     }
 
-    const openaiFile = await openai.files.create({
+    const openaiFile = await openaiClient.files.create({
       file: fs.createReadStream(uploadPath),
       purpose: 'assistants',
     });
 
     await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiFileId: openaiFile.id, openaiStatus: 'uploaded' } });
 
-    const vectorStoreFile = await openai.beta.vectorStores.files.create(vectorStoreId, { file_id: openaiFile.id });
+    const vectorStoreFile = await openaiClient.beta.vectorStores.files.create(vectorStoreId, { file_id: openaiFile.id });
     const openaiStatus = await pollVectorStoreFile(vectorStoreId, vectorStoreFile.id);
     await prisma.dealDocument.update({ where: { id: document.id }, data: { openaiStatus } });
 
