@@ -9,14 +9,16 @@ vi.mock('../lib/openai', () => {
     ],
   });
   const mockParse = vi.fn();
+  const mockCreate = vi.fn();
   return {
     openai: {
       beta: { vectorStores: { search: mockSearch } },
-      responses: { parse: mockParse },
+      responses: { parse: mockParse, create: mockCreate },
     },
     OPENAI_MODEL: 'test-model',
     __mockSearch: mockSearch,
     __mockParse: mockParse,
+    __mockCreate: mockCreate,
   } as any;
 });
 
@@ -35,7 +37,7 @@ vi.mock('../lib/prisma', () => {
         documents: [],
         fund: {
           organizationId: 'org1',
-          organization: { countryPacks: [{ id: 'pack1', countryCode: 'FR' }] },
+          organization: { countryPacks: [{ id: 'pack1', countryCode: 'FR', allowedDomains: ['grid.gouv.fr'] }] },
         },
         openaiVectorStoreId: 'vs-123',
       }),
@@ -120,5 +122,39 @@ describe('analysis engine', () => {
     const confidence = computeEnergizationConfidence(evidence.extracted_facts, (run.checklist as any[]).length);
     expect(confidence).toBeGreaterThan(10);
     expect((run as any).evidenceSnippets?.length).toBeGreaterThan(0);
+  });
+
+  it('attaches official market research when requested', async () => {
+    const snippetId = createSnippetId('file-1', snippetText);
+    (openai as any).responses.parse.mockResolvedValue({
+      extracted_facts: {
+        reserved_mw: { value: 24, citations: [snippetId] },
+        voltage_kv: { value: 110, citations: [snippetId] },
+        energization_target: { value: 'Q4 2025', citations: [snippetId] },
+        firmness_type: { value: 'firm', citations: [snippetId] },
+        curtailment_cap: { value: null, citations: [] },
+        grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
+        permits_status: { value: 'Permit granted', citations: [snippetId] },
+        customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
+      },
+      checks: [],
+    });
+    (openai as any).responses.create.mockResolvedValue({
+      output_text: 'Official grid process summary [1]',
+      web_search_call: { action: { sources: ['https://grid.gouv.fr/process'] } },
+    });
+
+    const run = await runDeterministicAnalysis({
+      dealId: 'deal1',
+      userId: 'user1',
+      organizationId: 'org1',
+      includeMarketResearch: true,
+    });
+
+    expect((openai as any).responses.create).toHaveBeenCalled();
+    const research = (run as any).marketResearch as any;
+    expect(research.summary).toContain('Official grid process');
+    expect(research.sources).toContain('https://grid.gouv.fr/process');
+    expect(research.citations).toContain('https://grid.gouv.fr/process');
   });
 });

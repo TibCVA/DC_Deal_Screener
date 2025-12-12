@@ -19,6 +19,7 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
   const [message, setMessage] = useState('');
   const [binderTab, setBinderTab] = useState<'uploads' | 'evidence'>('uploads');
   const [selectedSnippet, setSelectedSnippet] = useState<AnalysisEvidenceSnippet | null>(null);
+  const [includeMarketResearch, setIncludeMarketResearch] = useState(false);
   const canEdit = role === Role.ADMIN || role === Role.ANALYST;
 
   function renderStatusBadge(status?: string) {
@@ -61,7 +62,7 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
       const res = await fetch('/api/analysis/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dealId: deal.id }),
+        body: JSON.stringify({ dealId: deal.id, includeMarketResearch }),
       });
       if (res.ok) {
         const data = (await res.json()) as AnalysisWithEvidence;
@@ -81,6 +82,10 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
     return Object.fromEntries(activeRun.evidenceSnippets.map((s) => [s.snippetId, s]));
   }, [activeRun]);
 
+  const marketResearch = (activeRun as any)?.marketResearch as
+    | { summary?: string; citations?: string[]; sources?: string[] }
+    | undefined;
+
   function renderRunStatus(status?: string) {
     const normalized = (status || 'SUCCESS').toLowerCase();
     const color = normalized === 'failed' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700';
@@ -96,9 +101,20 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
           <h1 className="text-2xl font-semibold">{deal.name}</h1>
           <p className="text-sm text-slate-500">{deal.productType}</p>
         </div>
-        <button onClick={runAnalysis} className="btn-primary" disabled={running || !canEdit}>
-          {running ? 'Running…' : 'Run analysis'}
-        </button>
+        <div className="flex flex-col items-end gap-2">
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={includeMarketResearch}
+              onChange={(e) => setIncludeMarketResearch(e.target.checked)}
+              disabled={!canEdit || running}
+            />
+            Include official market research
+          </label>
+          <button onClick={runAnalysis} className="btn-primary" disabled={running || !canEdit}>
+            {running ? 'Running…' : 'Run analysis'}
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -232,6 +248,51 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
               {(activeRun.checklist as any[]).length === 0 && <p className="text-sm text-slate-500">No outstanding items.</p>}
             </ul>
           </div>
+        </div>
+      )}
+
+      {activeRun && (
+        <div className="card p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold">Market context</h3>
+              <p className="text-xs text-slate-500">Official-only guidance with citations.</p>
+            </div>
+          </div>
+          {marketResearch?.summary ? (
+            <div className="mt-3 space-y-3 text-sm text-slate-700">
+              <p className="whitespace-pre-wrap">{marketResearch.summary}</p>
+              {marketResearch.citations && marketResearch.citations.length > 0 && (
+                <div className="space-y-1 text-xs text-brand">
+                  <p className="font-semibold text-slate-900">Citations</p>
+                  <div className="flex flex-wrap gap-2">
+                    {marketResearch.citations.map((c) => (
+                      <a key={c} href={c} target="_blank" rel="noreferrer" className="underline">
+                        {c}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="space-y-1 text-xs text-slate-600">
+                <p className="font-semibold text-slate-900">Sources consulted</p>
+                <ul className="list-disc space-y-1 pl-4">
+                  {(marketResearch.sources || []).map((s) => (
+                    <li key={s}>
+                      <a href={s} target="_blank" rel="noreferrer" className="text-brand underline">
+                        {s}
+                      </a>
+                    </li>
+                  ))}
+                  {(marketResearch.sources || []).length === 0 && <li className="list-none text-slate-500">None listed.</li>}
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-slate-500">
+              Market research was not requested or no official domains were available for this country.
+            </p>
+          )}
         </div>
       )}
 

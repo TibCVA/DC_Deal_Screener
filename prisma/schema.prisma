@@ -133,6 +133,7 @@ model AnalysisRun {
   scorecard     Json
   summary       String
   checklist     Json
+  marketResearch Json?
   status        AnalysisRunStatus @default(SUCCESS)
   errorMessage  String?
   modelUsed     String?
