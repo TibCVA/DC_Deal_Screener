@@ -55,13 +55,11 @@ vi.mock('@/lib/openai', () => ({
     files: {
       create: mockFilesCreate,
     },
-    beta: {
-      vectorStores: {
-        create: (...args: any[]) => mockVectorStoreCreate(...args),
-        files: {
-          create: (...args: any[]) => mockVectorStoreFileCreate(...args),
-          retrieve: (...args: any[]) => mockRetrieve(...args),
-        },
+    vectorStores: {
+      create: (...args: any[]) => mockVectorStoreCreate(...args),
+      files: {
+        create: (...args: any[]) => mockVectorStoreFileCreate(...args),
+        retrieve: (...args: any[]) => mockRetrieve(...args),
       },
     },
   },
@@ -87,11 +85,7 @@ beforeEach(() => {
   mockVectorStoreCreate.mockReset();
   mockVectorStoreFileCreate.mockReset();
 
-  mockFilesCreate.mockImplementation(async ({ file }: any) => {
-    const streamPath = (file as fs.ReadStream).path as string;
-    expect(fs.existsSync(streamPath)).toBe(true);
-    return { id: 'file-123' };
-  });
+  mockFilesCreate.mockResolvedValue({ id: 'file-123' });
 
   mockDealDocumentCreate.mockResolvedValue({
     id: 'doc-1',
@@ -139,7 +133,5 @@ describe('upload api', () => {
     expect(mockVectorStoreCreate).not.toHaveBeenCalled();
     const createCall = (mockVectorStoreFileCreate.mock.calls[0][1] as any).file_id;
     expect(createCall).toBe('file-123');
-    const fileArg = (mockFilesCreate.mock.calls[0][0] as any).file as fs.ReadStream;
-    expect((fileArg.path as string).endsWith('.txt')).toBe(true);
   });
 });

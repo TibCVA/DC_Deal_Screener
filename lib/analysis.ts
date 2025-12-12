@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { z } from 'zod';
+import { zodTextFormat } from 'openai/helpers/zod';
 import { sanitizeAllowedDomainsInput, normalizeUrlForClick } from './allowedDomains';
 import { openai, OPENAI_MODEL } from './openai';
 import { prisma } from './prisma';
@@ -91,6 +92,9 @@ const RETRIEVAL_QUERIES = [
   'customer traction LOI or contract',
 ];
 
+const SNIPPET_LIMIT = 25;
+const SNIPPET_TEXT_LIMIT = 1200;
+
 const DEFAULT_FACTS: ExtractedFacts = {
   reserved_mw: { value: null, citations: [] },
   voltage_kv: { value: null, citations: [] },
@@ -108,40 +112,42 @@ export function createSnippetId(fileId: string | undefined, text: string) {
 
 async function retrieveEvidenceSnippets(vectorStoreId?: string): Promise<EvidenceSnippet[]> {
   const openaiClient = openai as any;
-  if (!vectorStoreId || !openaiClient?.beta?.vectorStores?.search) return [];
+  if (!vectorStoreId || !openaiClient?.vectorStores?.search) return [];
 
   const collected: EvidenceSnippet[] = [];
   const seen = new Set<string>();
 
   for (const query of RETRIEVAL_QUERIES) {
-    const search = await openaiClient.beta.vectorStores.search({
-      vector_store_id: vectorStoreId,
-      query,
-      limit: 5,
-    }).catch(() => ({ data: [] }));
+    const search = await openaiClient.vectorStores
+      .search(vectorStoreId, { query, max_num_results: 5 })
+      .catch(() => ({ data: [] }));
 
-    const results = (search as any).data || [];
+    const results = (search?.data as any[]) || [];
     for (const result of results) {
-      const text: string = result.text || result.content?.[0]?.text || '';
-      if (!text) continue;
-      const snippetId = createSnippetId(result.file_id || result.document_id, text);
-      if (seen.has(snippetId)) continue;
-      seen.add(snippetId);
-      collected.push({
-        snippetId,
-        text,
-        fileId: result.file_id || result.document_id,
-        openaiFileId: result.file_id,
-        openaiDocumentId: result.document_id,
-        openaiVectorStoreId: vectorStoreId,
-        fileName: result.file_name || result.metadata?.file_name,
-        score: typeof result.score === 'number' ? result.score : undefined,
-        metadata: result.metadata,
-      });
+      const chunks = (result.content || []).filter((c: any) => typeof c.text === 'string');
+      for (const chunk of chunks) {
+        const text = String(chunk.text || '').slice(0, SNIPPET_TEXT_LIMIT);
+        if (!text) continue;
+        const snippetId = createSnippetId(result.file_id, `${query}:${text}`);
+        if (seen.has(snippetId)) continue;
+        seen.add(snippetId);
+        collected.push({
+          snippetId,
+          text,
+          fileId: result.file_id,
+          openaiFileId: result.file_id,
+          openaiVectorStoreId: vectorStoreId,
+          fileName: result.filename,
+          score: typeof result.score === 'number' ? result.score : undefined,
+          metadata: result.attributes,
+        });
+      }
     }
   }
 
-  return collected;
+  return collected
+    .sort((a, b) => (b.score || 0) - (a.score || 0) || a.snippetId.localeCompare(b.snippetId))
+    .slice(0, SNIPPET_LIMIT);
 }
 
 function buildPromptFromSnippets(snippets: EvidenceSnippet[]) {
@@ -155,7 +161,7 @@ function buildPromptFromSnippets(snippets: EvidenceSnippet[]) {
 }
 
 async function extractFacts(snippets: EvidenceSnippet[]) {
-  if (!openai?.responses?.parse || snippets.length === 0) {
+  if (!openai?.responses?.create || snippets.length === 0) {
     return { extracted_facts: DEFAULT_FACTS, checks: [{ priority: 'High', question: 'Provide evidence for grid connection and capacity.', why: 'No snippets retrieved', requested_artifact: 'Grid contract' }] };
   }
 
@@ -165,11 +171,13 @@ async function extractFacts(snippets: EvidenceSnippet[]) {
     checks: checklistSchema,
   });
 
-  const response = await openai.responses
-    .parse({
+  const format = zodTextFormat(schema, 'evidence_payload');
+  const response = await (openai as any).responses
+    .create({
       model: OPENAI_MODEL,
       input: prompt,
-      schema,
+      temperature: 0,
+      response_format: format,
     })
     .catch(() => null);
 
@@ -177,18 +185,38 @@ async function extractFacts(snippets: EvidenceSnippet[]) {
     return { extracted_facts: DEFAULT_FACTS, checks: [{ priority: 'High', question: 'Share substantiation for grid connection and permits.', why: 'OpenAI extraction failed', requested_artifact: 'Grid + permits' }] };
   }
 
-  const parsed = schema.parse(response as any);
+  let parsed: z.infer<typeof schema>;
+  if (response.output_parsed) {
+    parsed = response.output_parsed as z.infer<typeof schema>;
+  } else {
+    const text = response.output_text || extractTextFromResponse(response);
+    parsed = schema.parse(JSON.parse(text));
+  }
   const snippetIds = new Set(snippets.map((s) => s.snippetId));
   const normalizedFacts = { ...DEFAULT_FACTS } as ExtractedFacts;
+  const missingCitations: ChecklistItem[] = [];
+
   (Object.keys(parsed.extracted_facts) as (keyof ExtractedFacts)[]).forEach((key) => {
     const fact = parsed.extracted_facts[key];
-    normalizedFacts[key] = {
-      value: fact.value,
-      citations: (fact.citations || []).filter((c) => snippetIds.has(c)),
-    } as any;
+    const citations = (fact.citations || []).filter((c) => snippetIds.has(c));
+    if (fact.value !== null && citations.length === 0) {
+      normalizedFacts[key] = { value: null, citations: [] } as any;
+      missingCitations.push({
+        priority: 'High',
+        question: `Provide evidence for ${key.replace(/_/g, ' ')} with a citation.`,
+        why: 'Model returned a value without a valid snippet citation.',
+        requested_artifact: 'Evidence backing the fact',
+        contextual: true,
+      });
+    } else {
+      normalizedFacts[key] = {
+        value: fact.value,
+        citations,
+      } as any;
+    }
   });
 
-  return { extracted_facts: normalizedFacts, checks: parsed.checks };
+  return { extracted_facts: normalizedFacts, checks: parsed.checks.concat(missingCitations) };
 }
 
 function extractTextFromResponse(response: any) {

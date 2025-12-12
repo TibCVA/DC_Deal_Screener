@@ -11,7 +11,10 @@
     "check": "pnpm -s typecheck && pnpm -s lint && pnpm -s prisma validate && pnpm -s test",
     "prisma": "prisma",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bootstrap:admin": "ts-node scripts/bootstrap-admin.ts",
+    "seed:demo": "DEMO_SEED=1 prisma db seed",
+    "smoke:openai": "RUN_INTEGRATION_TESTS=1 ts-node tests/smoke-openai.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -36,6 +39,7 @@
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-hook-form": "^7.51.3",
+    "@aws-sdk/client-s3": "^3.624.0",
     "server-only": "^0.0.1",
     "tailwind-merge": "^2.2.1",
     "tailwindcss-animate": "^1.0.7",

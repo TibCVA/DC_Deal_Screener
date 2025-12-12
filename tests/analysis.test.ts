@@ -7,19 +7,24 @@ const snippetText = vi.hoisted(() => 'Grid connection reserved 24 MW at 110kV, f
 vi.mock('../lib/openai', () => {
   const mockSearch = vi.fn().mockResolvedValue({
     data: [
-      { id: 'hit1', text: snippetText, file_id: 'file-1', file_name: 'connection_letter.txt', score: 0.98 },
+      {
+        id: 'hit1',
+        file_id: 'file-1',
+        filename: 'connection_letter.txt',
+        score: 0.98,
+        content: [{ type: 'text', text: snippetText }],
+        attributes: {},
+      },
     ],
   });
-  const mockParse = vi.fn();
   const mockCreate = vi.fn();
   return {
     openai: {
-      beta: { vectorStores: { search: mockSearch } },
-      responses: { parse: mockParse, create: mockCreate },
+      vectorStores: { search: mockSearch },
+      responses: { create: mockCreate },
     },
     OPENAI_MODEL: 'test-model',
     __mockSearch: mockSearch,
-    __mockParse: mockParse,
     __mockCreate: mockCreate,
   } as any;
 });
@@ -85,7 +90,6 @@ import { prisma } from '../lib/prisma';
 
 describe('analysis engine', () => {
   beforeEach(() => {
-    (openai as any).responses.parse.mockReset();
     (openai as any).responses.create.mockReset();
   });
 
@@ -107,19 +111,22 @@ describe('analysis engine', () => {
   });
 
   it('runs deterministic analysis with fixture document', async () => {
-    const snippetId = createSnippetId('file-1', snippetText);
-    (openai as any).responses.parse.mockResolvedValue({
-      extracted_facts: {
-        reserved_mw: { value: 24, citations: [snippetId] },
-        voltage_kv: { value: 110, citations: [snippetId] },
-        energization_target: { value: 'Q4 2025', citations: [snippetId] },
-        firmness_type: { value: 'firm', citations: [snippetId] },
-        curtailment_cap: { value: null, citations: [] },
-        grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
-        permits_status: { value: 'Permit granted', citations: [snippetId] },
-        customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
+    const query = 'grid connection agreement or grid contract details';
+    const snippetId = createSnippetId('file-1', `${query}:${snippetText}`);
+    (openai as any).responses.create.mockResolvedValue({
+      output_parsed: {
+        extracted_facts: {
+          reserved_mw: { value: 24, citations: [snippetId] },
+          voltage_kv: { value: 110, citations: [snippetId] },
+          energization_target: { value: 'Q4 2025', citations: [snippetId] },
+          firmness_type: { value: 'firm', citations: [snippetId] },
+          curtailment_cap: { value: null, citations: [] },
+          grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
+          permits_status: { value: 'Permit granted', citations: [snippetId] },
+          customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
+        },
+        checks: [],
       },
-      checks: [],
     });
 
     const run = await runDeterministicAnalysis({ dealId: 'deal1', userId: 'user1', organizationId: 'org1' });
@@ -134,24 +141,44 @@ describe('analysis engine', () => {
   });
 
   it('attaches official market research when requested', async () => {
-    const snippetId = createSnippetId('file-1', snippetText);
-    (openai as any).responses.parse.mockResolvedValue({
-      extracted_facts: {
-        reserved_mw: { value: 24, citations: [snippetId] },
-        voltage_kv: { value: 110, citations: [snippetId] },
-        energization_target: { value: 'Q4 2025', citations: [snippetId] },
-        firmness_type: { value: 'firm', citations: [snippetId] },
-        curtailment_cap: { value: null, citations: [] },
-        grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
-        permits_status: { value: 'Permit granted', citations: [snippetId] },
-        customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
-      },
-      checks: [],
-    });
+    const query = 'grid connection agreement or grid contract details';
+    const snippetId = createSnippetId('file-1', `${query}:${snippetText}`);
     (openai as any).responses.create.mockResolvedValue({
-      output_text: 'Official grid process summary [1]',
-      web_search_call: { action: { sources: ['https://grid.gouv.fr/process'] } },
+      output_parsed: {
+        extracted_facts: {
+          reserved_mw: { value: 24, citations: [snippetId] },
+          voltage_kv: { value: 110, citations: [snippetId] },
+          energization_target: { value: 'Q4 2025', citations: [snippetId] },
+          firmness_type: { value: 'firm', citations: [snippetId] },
+          curtailment_cap: { value: null, citations: [] },
+          grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
+          permits_status: { value: 'Permit granted', citations: [snippetId] },
+          customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
+        },
+        checks: [],
+      },
     });
+    (openai as any).responses.create
+      .mockResolvedValueOnce({
+        output_parsed: {
+          extracted_facts: {
+            reserved_mw: { value: 24, citations: [snippetId] },
+            voltage_kv: { value: 110, citations: [snippetId] },
+            energization_target: { value: 'Q4 2025', citations: [snippetId] },
+            firmness_type: { value: 'firm', citations: [snippetId] },
+            curtailment_cap: { value: null, citations: [] },
+            grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
+            permits_status: { value: 'Permit granted', citations: [snippetId] },
+            customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
+          },
+          checks: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        output_text: 'Official grid process summary [1]',
+        output: [{ content: [{ text: 'Official grid process summary [1]' }] }],
+        web_search_call: { action: { sources: ['https://grid.gouv.fr/process'] } },
+      });
 
     const run = await runDeterministicAnalysis({
       dealId: 'deal1',
@@ -168,7 +195,8 @@ describe('analysis engine', () => {
   });
 
   it('keeps scorecards deterministic while adding only official context payloads', async () => {
-    const snippetId = createSnippetId('file-1', snippetText);
+    const query = 'grid connection agreement or grid contract details';
+    const snippetId = createSnippetId('file-1', `${query}:${snippetText}`);
     const parsedFacts = {
       extracted_facts: {
         reserved_mw: { value: 24, citations: [snippetId] },
@@ -182,13 +210,19 @@ describe('analysis engine', () => {
       },
       checks: [],
     };
-    (openai as any).responses.parse.mockResolvedValue(parsedFacts);
-    (openai as any).responses.create.mockResolvedValue({
-      output_text: 'Official grid process summary [1]',
-      web_search_call: { action: { sources: ['https://grid.gouv.fr/process'] } },
-    });
+    (openai as any).responses.create.mockResolvedValue({ output_parsed: parsedFacts });
 
     const baseline = await runDeterministicAnalysis({ dealId: 'deal1', userId: 'user1', organizationId: 'org1' });
+
+    (openai as any).responses.create.mockReset();
+    (openai as any).responses.create
+      .mockResolvedValueOnce({ output_parsed: parsedFacts })
+      .mockResolvedValueOnce({
+        output_text: 'Official grid process summary [1]',
+        output: [{ content: [{ text: 'Official grid process summary [1]' }] }],
+        web_search_call: { action: { sources: ['https://grid.gouv.fr/process'] } },
+      });
+
     const withResearch = await runDeterministicAnalysis({
       dealId: 'deal1',
       userId: 'user1',
@@ -204,19 +238,22 @@ describe('analysis engine', () => {
   });
 
   it('skips market research when allowed domains are empty and surfaces guidance', async () => {
-    const snippetId = createSnippetId('file-1', snippetText);
-    (openai as any).responses.parse.mockResolvedValue({
-      extracted_facts: {
-        reserved_mw: { value: 24, citations: [snippetId] },
-        voltage_kv: { value: 110, citations: [snippetId] },
-        energization_target: { value: 'Q4 2025', citations: [snippetId] },
-        firmness_type: { value: 'firm', citations: [snippetId] },
-        curtailment_cap: { value: null, citations: [] },
-        grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
-        permits_status: { value: 'Permit granted', citations: [snippetId] },
-        customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
+    const query = 'grid connection agreement or grid contract details';
+    const snippetId = createSnippetId('file-1', `${query}:${snippetText}`);
+    (openai as any).responses.create.mockResolvedValue({
+      output_parsed: {
+        extracted_facts: {
+          reserved_mw: { value: 24, citations: [snippetId] },
+          voltage_kv: { value: 110, citations: [snippetId] },
+          energization_target: { value: 'Q4 2025', citations: [snippetId] },
+          firmness_type: { value: 'firm', citations: [snippetId] },
+          curtailment_cap: { value: null, citations: [] },
+          grid_title_artifact: { value: 'Title deed shared', citations: [snippetId] },
+          permits_status: { value: 'Permit granted', citations: [snippetId] },
+          customer_traction: { value: 'Anchor LOI signed', citations: [snippetId] },
+        },
+        checks: [],
       },
-      checks: [],
     });
 
     (prisma as any).deal.findUnique.mockResolvedValueOnce({
@@ -242,7 +279,7 @@ describe('analysis engine', () => {
       includeMarketResearch: true,
     });
 
-    expect((openai as any).responses.create).not.toHaveBeenCalled();
+    expect((openai as any).responses.create).toHaveBeenCalledTimes(1);
     expect((run as any).marketResearch?.status).toBe('SKIPPED');
     const contextual = (run as any).checklist.filter((c: any) => c.contextual);
     expect(contextual.some((c: any) => (c.question as string).includes('allowed domains'))).toBe(true);
