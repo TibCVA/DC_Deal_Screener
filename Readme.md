@@ -19,6 +19,7 @@ Evidence-first screening workspace for European data center deals. The app produ
    ```bash
    cp .env.example .env
    # Update DATABASE_URL, NEXTAUTH_SECRET, etc.
+   # Set OPENAI_API_KEY (server-side only) and optional OPENAI_MODEL
    ```
 3. Apply the initial migration to PostgreSQL and seed demo data:
    ```bash
@@ -34,6 +35,7 @@ Evidence-first screening workspace for European data center deals. The app produ
 ## Security
 - Authentication and authorization are derived from the server-side NextAuth session; the client should never send `userId` to APIs or server actions.
 - All access is scoped to the member's organization with role-based permissions (Admin/Analyst/Viewer).
+- OpenAI API keys stay on the server: all ingestion and retrieval calls use the server-side SDK and never expose keys to the browser.
 
 ## Key features
 - **Fund onboarding**: capture thesis, risk appetite, ESG/sovereignty constraints, required evidence level.

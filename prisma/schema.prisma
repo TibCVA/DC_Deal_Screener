@@ -82,6 +82,7 @@ model Deal {
   fundId      String
   documents   DealDocument[]
   analyses    AnalysisRun[]
+  openaiVectorStoreId String? @unique
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -93,6 +94,11 @@ model DealDocument {
   mimeType    String
   deal        Deal     @relation(fields: [dealId], references: [id])
   dealId      String
+  openaiFileId String? @unique
+  openaiStatus String  @default("pending")
+  sha256       String?
+  originalFileSize Int?
+  originalExt  String?
   uploadedAt  DateTime @default(now())
 }
 

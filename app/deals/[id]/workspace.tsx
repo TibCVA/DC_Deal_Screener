@@ -10,6 +10,18 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
   const [message, setMessage] = useState('');
   const canEdit = role === Role.ADMIN || role === Role.ANALYST;
 
+  function renderStatusBadge(status?: string) {
+    const normalized = (status || 'pending').toLowerCase();
+    const label = normalized === 'indexed' ? 'Indexed' : normalized === 'failed' ? 'Failed' : normalized === 'uploaded' ? 'Uploading' : 'Pending';
+    const color =
+      normalized === 'indexed'
+        ? 'bg-green-100 text-green-700'
+        : normalized === 'failed'
+          ? 'bg-rose-100 text-rose-700'
+          : 'bg-amber-100 text-amber-700';
+    return <span className={`rounded-full px-2 py-1 text-xs font-semibold ${color}`}>{label}</span>;
+  }
+
   async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!canEdit) {
@@ -81,7 +93,10 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
           <ul className="mt-4 space-y-2 text-sm text-slate-700">
             {deal.documents.map((doc) => (
               <li key={doc.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                <span>{doc.name}</span>
+                <div className="flex items-center gap-2">
+                  <span>{doc.name}</span>
+                  {renderStatusBadge(doc.openaiStatus)}
+                </div>
                 <span className="text-xs text-slate-500">{doc.mimeType}</span>
               </li>
             ))}
