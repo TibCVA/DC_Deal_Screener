@@ -84,6 +84,8 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
     return Object.fromEntries(activeRun.evidenceSnippets.map((s) => [s.snippetId, s]));
   }, [activeRun]);
 
+  const downloadHref = activeRun ? `/api/deals/${deal.id}/runs/${activeRun.id}/export/pdf` : null;
+
   const marketResearch = (activeRun as any)?.marketResearch as MarketResearchPayload | undefined;
   const marketResearchIncluded = Boolean((activeRun as any)?.marketResearchIncluded);
 
@@ -112,9 +114,26 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
             />
             Include official market research
           </label>
-          <button onClick={runAnalysis} className="btn-primary" disabled={running || !canEdit}>
-            {running ? 'Running…' : 'Run analysis'}
-          </button>
+          <div className="flex items-center gap-2">
+            {downloadHref ? (
+              <a
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                href={downloadHref}
+              >
+                Download IC Pack (PDF)
+              </a>
+            ) : (
+              <button
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-400"
+                disabled
+              >
+                Download IC Pack (PDF)
+              </button>
+            )}
+            <button onClick={runAnalysis} className="btn-primary" disabled={running || !canEdit}>
+              {running ? 'Running…' : 'Run analysis'}
+            </button>
+          </div>
         </div>
       </div>
 
