@@ -52,8 +52,12 @@ export type EvidenceSnippet = {
   snippetId: string;
   text: string;
   fileId?: string;
+  openaiFileId?: string;
+  openaiDocumentId?: string;
+  openaiVectorStoreId?: string;
   fileName?: string;
   score?: number;
+  metadata?: Record<string, any>;
 };
 
 const RETRIEVAL_QUERIES = [
@@ -85,13 +89,14 @@ export function createSnippetId(fileId: string | undefined, text: string) {
 }
 
 async function retrieveEvidenceSnippets(vectorStoreId?: string): Promise<EvidenceSnippet[]> {
-  if (!vectorStoreId || !openai?.beta?.vectorStores?.search) return [];
+  const openaiClient = openai as any;
+  if (!vectorStoreId || !openaiClient?.beta?.vectorStores?.search) return [];
 
   const collected: EvidenceSnippet[] = [];
   const seen = new Set<string>();
 
   for (const query of RETRIEVAL_QUERIES) {
-    const search = await openai.beta.vectorStores.search({
+    const search = await openaiClient.beta.vectorStores.search({
       vector_store_id: vectorStoreId,
       query,
       limit: 5,
@@ -108,8 +113,12 @@ async function retrieveEvidenceSnippets(vectorStoreId?: string): Promise<Evidenc
         snippetId,
         text,
         fileId: result.file_id || result.document_id,
+        openaiFileId: result.file_id,
+        openaiDocumentId: result.document_id,
+        openaiVectorStoreId: vectorStoreId,
         fileName: result.file_name || result.metadata?.file_name,
         score: typeof result.score === 'number' ? result.score : undefined,
+        metadata: result.metadata,
       });
     }
   }
@@ -198,6 +207,9 @@ export async function runDeterministicAnalysis({
       scorecard: scorecardSchema.parse(scorecard),
       summary,
       checklist: checklistSchema.parse(checklist),
+      status: 'SUCCESS',
+      errorMessage: null,
+      modelUsed: OPENAI_MODEL,
     },
   });
 
@@ -209,7 +221,11 @@ export async function runDeterministicAnalysis({
         text: s.text,
         fileId: s.fileId,
         fileName: s.fileName,
+        openaiFileId: s.openaiFileId,
+        openaiDocumentId: s.openaiDocumentId,
+        openaiVectorStoreId: s.openaiVectorStoreId,
         score: s.score,
+        metadata: s.metadata,
       })),
       skipDuplicates: true,
     });

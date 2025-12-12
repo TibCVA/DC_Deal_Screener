@@ -1,12 +1,19 @@
 'use client';
 
-import { AnalysisEvidenceSnippet, AnalysisRun, Deal, DealDocument, Role } from '@prisma/client';
+import { AnalysisEvidenceSnippet, AnalysisRun, AnalysisRunStatus, Deal, DealDocument, Role } from '@prisma/client';
 import { useMemo, useState, useTransition } from 'react';
 
-type AnalysisWithEvidence = AnalysisRun & { evidenceSnippets: AnalysisEvidenceSnippet[] };
+type AnalysisWithEvidence =
+  Omit<AnalysisRun, 'status' | 'errorMessage' | 'modelUsed'> & {
+    status: AnalysisRunStatus;
+    errorMessage: string | null;
+    modelUsed: string | null;
+    evidenceSnippets: AnalysisEvidenceSnippet[];
+  };
 
 export default function DealWorkspace({ deal, role }: { deal: Deal & { documents: DealDocument[]; analyses: AnalysisWithEvidence[] }; role: Role; }) {
   const [analyses, setAnalyses] = useState<AnalysisWithEvidence[]>(deal.analyses);
+  const [activeRunId, setActiveRunId] = useState<string | null>(deal.analyses[0]?.id || null);
   const [uploading, setUploading] = useState(false);
   const [running, startTransition] = useTransition();
   const [message, setMessage] = useState('');
@@ -59,6 +66,7 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
       if (res.ok) {
         const data = (await res.json()) as AnalysisWithEvidence;
         setAnalyses((prev) => [data, ...prev]);
+        setActiveRunId(data.id);
         setMessage('Analysis completed');
       } else {
         const body = await res.json().catch(() => ({}));
@@ -67,11 +75,18 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
     });
   }
 
-  const latest = analyses[0];
+  const activeRun = useMemo(() => analyses.find((a) => a.id === activeRunId) || analyses[0], [analyses, activeRunId]);
   const snippetMap = useMemo(() => {
-    if (!latest) return {} as Record<string, AnalysisEvidenceSnippet>;
-    return Object.fromEntries(latest.evidenceSnippets.map((s) => [s.snippetId, s]));
-  }, [latest]);
+    if (!activeRun) return {} as Record<string, AnalysisEvidenceSnippet>;
+    return Object.fromEntries(activeRun.evidenceSnippets.map((s) => [s.snippetId, s]));
+  }, [activeRun]);
+
+  function renderRunStatus(status?: string) {
+    const normalized = (status || 'SUCCESS').toLowerCase();
+    const color = normalized === 'failed' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700';
+    const label = normalized === 'failed' ? 'Failed' : 'Success';
+    return <span className={`rounded-full px-2 py-1 text-xs font-semibold ${color}`}>{label}</span>;
+  }
 
   return (
     <div className="space-y-6">
@@ -136,9 +151,9 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
 
           {binderTab === 'evidence' && (
             <div className="space-y-2">
-              {latest ? (
-                latest.evidenceSnippets.length > 0 ? (
-                  latest.evidenceSnippets.map((snippet) => (
+              {activeRun ? (
+                activeRun.evidenceSnippets.length > 0 ? (
+                  activeRun.evidenceSnippets.map((snippet) => (
                     <div key={snippet.id} className="rounded-lg border border-slate-200 p-3">
                       <div className="flex items-center justify-between gap-2 text-sm text-slate-600">
                         <span className="font-semibold text-slate-900">{snippet.fileName || 'Snippet'}</span>
@@ -158,11 +173,16 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
         </div>
         <div className="card p-4">
           <h2 className="font-semibold">Latest scorecard</h2>
-          {latest ? (
+          {activeRun ? (
             <div className="space-y-3 text-sm text-slate-700">
               <p className="font-semibold text-slate-900">Summary</p>
-              <p className="text-slate-600">{latest.summary}</p>
-              <p className="text-xs text-slate-500">Run at {new Date(latest.createdAt).toLocaleString()}</p>
+              <p className="text-slate-600">{activeRun.summary}</p>
+              <p className="text-xs text-slate-500">Run at {new Date(activeRun.createdAt).toLocaleString()}</p>
+              <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                {renderRunStatus(activeRun.status)}
+                {activeRun.modelUsed && <span>Model: {activeRun.modelUsed}</span>}
+              </div>
+              {activeRun.errorMessage && <p className="text-xs text-rose-600">Error: {activeRun.errorMessage}</p>}
             </div>
           ) : (
             <p className="text-sm text-slate-500">No analysis yet. Run to generate the IC pack skeleton.</p>
@@ -170,12 +190,12 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
         </div>
       </div>
 
-      {latest && (
+      {activeRun && (
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="card p-4 lg:col-span-2">
             <h3 className="font-semibold">Scorecard</h3>
             <div className="mt-3 space-y-2">
-              {(latest.scorecard as any[]).map((item, idx) => (
+              {(activeRun.scorecard as any[]).map((item, idx) => (
                 <div key={idx} className="rounded-lg border border-slate-200 p-3">
                   <div className="flex items-center justify-between">
                     <p className="font-semibold">{item.criterion}</p>
@@ -203,17 +223,44 @@ export default function DealWorkspace({ deal, role }: { deal: Deal & { documents
           <div className="card p-4">
             <h3 className="font-semibold">Checklist</h3>
             <ul className="mt-3 space-y-2 text-sm text-slate-700">
-              {(latest.checklist as any[]).map((item, idx) => (
+              {(activeRun.checklist as any[]).map((item, idx) => (
                 <li key={idx} className="rounded-lg border border-slate-200 px-3 py-2">
                   <p className="font-semibold">{item.question}</p>
                   <p className="text-xs text-slate-500">Priority: {item.priority}</p>
                 </li>
               ))}
-              {(latest.checklist as any[]).length === 0 && <p className="text-sm text-slate-500">No outstanding items.</p>}
+              {(activeRun.checklist as any[]).length === 0 && <p className="text-sm text-slate-500">No outstanding items.</p>}
             </ul>
           </div>
         </div>
       )}
+
+      <div className="card p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">Run history</h3>
+          <p className="text-xs text-slate-500">Tracks each Prompt 3.5 execution with outcomes.</p>
+        </div>
+        <div className="mt-3 divide-y divide-slate-100 text-sm">
+          {analyses.map((run) => (
+            <button
+              key={run.id}
+              className={`flex w-full items-center justify-between px-2 py-3 text-left ${run.id === activeRun?.id ? 'bg-slate-50' : ''}`}
+              onClick={() => setActiveRunId(run.id)}
+            >
+              <div>
+                <p className="font-semibold text-slate-900">{new Date(run.createdAt).toLocaleString()}</p>
+                <p className="text-xs text-slate-500">{run.summary}</p>
+                {run.errorMessage && <p className="text-xs text-rose-600">{run.errorMessage}</p>}
+              </div>
+              <div className="flex flex-col items-end gap-1 text-xs text-slate-500">
+                {renderRunStatus(run.status)}
+                {run.modelUsed && <span>Model: {run.modelUsed}</span>}
+              </div>
+            </button>
+          ))}
+          {analyses.length === 0 && <p className="py-3 text-sm text-slate-500">No historical runs captured.</p>}
+        </div>
+      </div>
 
       {message && <p className="text-sm text-brand">{message}</p>}
 

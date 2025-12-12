@@ -6,9 +6,9 @@ const prisma = new PrismaClient();
 async function main() {
   const passwordHash = await hash('password123', 10);
   const org = await prisma.organization.upsert({
-    where: { name: 'Demo Infrastructure Partners' },
+    where: { id: 'demo-org' },
     update: {},
-    create: { name: 'Demo Infrastructure Partners' },
+    create: { id: 'demo-org', name: 'Demo Infrastructure Partners' },
   });
 
   const user = await prisma.user.upsert({
@@ -24,9 +24,10 @@ async function main() {
   });
 
   const fund = await prisma.fund.upsert({
-    where: { name: 'Pan-EU Digital Infra Fund' },
+    where: { id: 'demo-fund' },
     update: {},
     create: {
+      id: 'demo-fund',
       name: 'Pan-EU Digital Infra Fund',
       organizationId: org.id,
       thesis: {
@@ -41,9 +42,10 @@ async function main() {
   });
 
   await prisma.deal.upsert({
-    where: { name: 'Paris South Campus' },
+    where: { id: 'demo-deal' },
     update: {},
     create: {
+      id: 'demo-deal',
       name: 'Paris South Campus',
       country: 'FR',
       city: 'Paris',

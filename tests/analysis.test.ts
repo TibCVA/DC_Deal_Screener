@@ -42,7 +42,15 @@ vi.mock('../lib/prisma', () => {
     },
     analysisRun: {
       create: vi.fn().mockImplementation(async ({ data }: any) => {
-        const record = { ...data, id: `run-${runRecord.runs.length + 1}`, createdAt: new Date(), evidenceSnippets: [] };
+        const record = {
+          ...data,
+          status: data.status || 'SUCCESS',
+          modelUsed: data.modelUsed || 'test-model',
+          errorMessage: data.errorMessage ?? null,
+          id: `run-${runRecord.runs.length + 1}`,
+          createdAt: new Date(),
+          evidenceSnippets: [],
+        };
         runRecord.runs.push(record);
         return record;
       }),

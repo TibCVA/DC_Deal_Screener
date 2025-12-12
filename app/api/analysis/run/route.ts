@@ -16,7 +16,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Membership required' }, { status: 403 });
   }
 
-  if (![Role.ADMIN, Role.ANALYST].includes(membership.role)) {
+  const privilegedRoles: Role[] = [Role.ADMIN, Role.ANALYST];
+  if (!privilegedRoles.includes(membership.role)) {
     return NextResponse.json({ error: 'Insufficient role to run analysis' }, { status: 403 });
   }
 

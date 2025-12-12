@@ -22,7 +22,14 @@ export default async function RunsPage() {
           <div key={run.id} className="px-5 py-4 text-sm">
             <p className="font-semibold text-slate-900">{run.deal.name}</p>
             <p className="text-slate-600">{run.summary}</p>
-            <p className="text-xs text-slate-500">{run.createdAt.toLocaleString()}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span className={`rounded-full px-2 py-1 font-semibold ${run.status === 'FAILED' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                {run.status === 'FAILED' ? 'Failed' : 'Success'}
+              </span>
+              {run.modelUsed && <span>Model: {run.modelUsed}</span>}
+              <span>{run.createdAt.toLocaleString()}</span>
+            </div>
+            {run.errorMessage && <p className="text-xs text-rose-600">Error: {run.errorMessage}</p>}
           </div>
         ))}
         {runs.length === 0 && <p className="p-5 text-sm text-slate-500">No runs yet.</p>}
