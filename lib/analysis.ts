@@ -44,9 +44,9 @@ export const checklistSchema = z.array(
   z.object({
     priority: z.string(),
     question: z.string(),
-    why: z.string().optional(),
-    requested_artifact: z.string().nullable().optional(),
-    contextual: z.boolean().optional(),
+    why: z.string().nullable().default(null),
+    requested_artifact: z.string().nullable().default(null),
+    contextual: z.boolean().nullable().default(null),
   })
 );
 
