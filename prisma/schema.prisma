@@ -7,6 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ENUMS
+// ════════════════════════════════════════════════════════════════════════════
+
 enum Role {
   ADMIN
   ANALYST
@@ -16,158 +20,276 @@ enum Role {
 enum DealType {
   GREENFIELD
   BROWNFIELD
+  EXPANSION
+  ACQUISITION
 }
 
 enum ScoreStatus {
   VERIFIED
   PARTIAL
   UNKNOWN
+  RED_FLAG
 }
 
 enum AnalysisRunStatus {
   SUCCESS
   FAILED
+  PARTIAL
 }
 
+enum DealStage {
+  SCREENING
+  INITIAL_DD
+  DEEP_DD
+  IC_READY
+  PASSED
+  REJECTED
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// USER & ORGANIZATION
+// ════════════════════════════════════════════════════════════════════════════
+
 model User {
-  id          String       @id @default(uuid())
-  email       String       @unique
-  name        String
+  id           String       @id @default(uuid())
+  email        String       @unique
+  name         String
   passwordHash String
-  memberships Membership[]
+  memberships  Membership[]
   analysisRuns AnalysisRun[] @relation("UserRuns")
-  auditLogs   AuditLog[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  auditLogs    AuditLog[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 }
 
 model Organization {
-  id          String       @id @default(uuid())
-  name        String
-  memberships Membership[]
-  funds       Fund[]
+  id           String        @id @default(uuid())
+  name         String
+  memberships  Membership[]
+  funds        Fund[]
   countryPacks CountryPack[]
-  auditLogs   AuditLog[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  auditLogs    AuditLog[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 }
 
 model Membership {
-  id              String        @id @default(uuid())
-  role            Role
-  user            User          @relation(fields: [userId], references: [id])
-  userId          String
-  organization    Organization  @relation(fields: [organizationId], references: [id])
-  organizationId  String
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             String       @id @default(uuid())
+  role           Role
+  user           User         @relation(fields: [userId], references: [id])
+  userId         String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@unique([userId, organizationId])
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// FUND - With structured policy
+// ════════════════════════════════════════════════════════════════════════════
+
 model Fund {
-  id              String    @id @default(uuid())
-  name            String
-  thesis          Json
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  organizationId  String
-  deals           Deal[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String       @id @default(uuid())
+  name           String
+
+  // Legacy thesis (JSON text) - kept for backwards compatibility
+  thesis         Json
+
+  // NEW: Structured investment policy
+  policy         Json?        // FundPolicy schema
+  policyPreset   String?      // 'conservative', 'growth', 'esg_focused', 'hyperscale', or null for custom
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  deals          Deal[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// DEAL - Extended with stage tracking
+// ════════════════════════════════════════════════════════════════════════════
 
 model Deal {
-  id          String   @id @default(uuid())
-  name        String
-  country     String
-  city        String
-  productType String
-  type        DealType
-  fund        Fund     @relation(fields: [fundId], references: [id])
-  fundId      String
-  documents   DealDocument[]
-  analyses    AnalysisRun[]
-  openaiVectorStoreId String? @unique
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                  String         @id @default(uuid())
+  name                String
+  country             String
+  city                String
+  productType         String
+  type                DealType
+
+  // NEW: Deal stage tracking
+  stage               DealStage      @default(SCREENING)
+  stageNotes          String?
+
+  // NEW: Deal metadata
+  targetMW            Float?
+  targetDeliveryDate  DateTime?
+  sponsorName         String?
+
+  fund                Fund           @relation(fields: [fundId], references: [id])
+  fundId              String
+  documents           DealDocument[]
+  analyses            AnalysisRun[]
+  openaiVectorStoreId String?        @unique
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// DOCUMENTS - Extended with quality tracking
+// ════════════════════════════════════════════════════════════════════════════
 
 model DealDocument {
-  id          String   @id @default(uuid())
-  name        String
-  path        String
-  mimeType    String
-  deal        Deal     @relation(fields: [dealId], references: [id])
-  dealId      String
-  openaiFileId String? @unique
-  openaiStatus String  @default("pending")
-  sha256       String?
+  id               String   @id @default(uuid())
+  name             String
+  path             String
+  mimeType         String
+  deal             Deal     @relation(fields: [dealId], references: [id])
+  dealId           String
+  openaiFileId     String?  @unique
+  openaiStatus     String   @default("pending")
+  sha256           String?
   originalFileSize Int?
-  originalExt  String?
-  uploadedAt  DateTime @default(now())
+  originalExt      String?
+
+  // NEW: Document quality indicators
+  textExtracted    Boolean  @default(true)  // false = likely scanned/image PDF
+  snippetCount     Int?                     // number of snippets extracted
+  lowTextWarning   Boolean  @default(false) // true = document may need OCR
+
+  // NEW: Document classification
+  documentType     String?  // 'grid_contract', 'lease', 'permit', 'loi', 'technical', 'other'
+
+  uploadedAt       DateTime @default(now())
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// COUNTRY PACK - Enhanced with machine-readable data
+// ════════════════════════════════════════════════════════════════════════════
+
 model CountryPack {
-  id              String   @id @default(uuid())
-  name            String
-  countryCode     String
-  allowedDomains  String[]
-  goldSources     Json
-  artefacts       Json
+  id               String       @id @default(uuid())
+  name             String
+  countryCode      String
+
+  // Official domains for web search
+  allowedDomains   String[]
+
+  // Documentation references
+  goldSources      Json         // Array of {name, url, description}
+
+  // Required artefacts definition
+  artefacts        Json         // Array of ArtefactDefinition
+
+  // Scoring overrides for this country
   scoringOverrides Json?
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  organizationId  String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+
+  // NEW: Full country data from library
+  countryData      Json?        // CountryPackData from country-packs-data.ts
+  useLibraryData   Boolean      @default(true) // If true, merge with library data
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  organizationId   String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   @@unique([organizationId, countryCode])
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ANALYSIS RUN - Extended with full DD ontology
+// ════════════════════════════════════════════════════════════════════════════
+
 model AnalysisRun {
-  id            String    @id @default(uuid())
-  deal          Deal      @relation(fields: [dealId], references: [id])
-  dealId        String
-  executedBy    User      @relation("UserRuns", fields: [executedById], references: [id])
-  executedById  String
-  evidence      Json
-  scorecard     Json
-  summary       String
-  checklist     Json
-  marketResearch Json?
-  marketResearchIncluded Boolean @default(false)
-  status        AnalysisRunStatus @default(SUCCESS)
-  errorMessage  String?
-  modelUsed     String?
-  createdAt     DateTime  @default(now())
-  evidenceSnippets AnalysisEvidenceSnippet[]
+  id                     String                    @id @default(uuid())
+  deal                   Deal                      @relation(fields: [dealId], references: [id])
+  dealId                 String
+  executedBy             User                      @relation("UserRuns", fields: [executedById], references: [id])
+  executedById           String
+
+  // Legacy fields (kept for backwards compatibility)
+  evidence               Json
+  scorecard              Json
+  summary                String
+  checklist              Json
+
+  // Market research
+  marketResearch         Json?
+  marketResearchIncluded Boolean                   @default(false)
+
+  // Run metadata
+  status                 AnalysisRunStatus         @default(SUCCESS)
+  errorMessage           String?
+  modelUsed              String?
+
+  // NEW: Extended DD ontology results
+  ddOntology             Json?                     // Full DDAnalysisResult
+
+  // NEW: Module-level scores
+  moduleScores           Json?                     // Array of ModuleScore
+
+  // NEW: Contradictions detected
+  contradictions         Json?                     // Array of Contradiction
+
+  // NEW: Red flags
+  redFlags               Json?                     // Array of RedFlag
+
+  // NEW: Energization probability
+  energizationProbability Json?                    // EnergizationProbability object
+
+  // NEW: Policy evaluation results
+  policyEvaluation       Json?                     // PolicyEvaluationResult
+
+  // NEW: Underwriting tape
+  underwritingTape       Json?                     // Array of UnderwritingTapeRow
+
+  createdAt              DateTime                  @default(now())
+  evidenceSnippets       AnalysisEvidenceSnippet[]
 }
 
-model AnalysisEvidenceSnippet {
-  id             String   @id @default(uuid())
-  analysisRun    AnalysisRun @relation(fields: [analysisRunId], references: [id])
-  analysisRunId  String
-  snippetId      String
-  text           String
-  fileId         String?
-  openaiFileId   String?
-  openaiDocumentId String?
-  openaiVectorStoreId String?
-  fileName       String?
-  score          Float?
-  createdAt      DateTime @default(now())
+// ════════════════════════════════════════════════════════════════════════════
+// EVIDENCE SNIPPETS
+// ════════════════════════════════════════════════════════════════════════════
 
-  metadata       Json?
+model AnalysisEvidenceSnippet {
+  id                  String      @id @default(uuid())
+  analysisRun         AnalysisRun @relation(fields: [analysisRunId], references: [id])
+  analysisRunId       String
+  snippetId           String
+  text                String
+  fileId              String?
+  openaiFileId        String?
+  openaiDocumentId    String?
+  openaiVectorStoreId String?
+  fileName            String?
+  score               Float?
+
+  // NEW: Module assignment
+  module              String?     // Which DD module this snippet relates to
+
+  // NEW: Fact extraction
+  extractedFacts      Json?       // Facts extracted from this specific snippet
+
+  metadata            Json?
+  createdAt           DateTime    @default(now())
 
   @@unique([analysisRunId, snippetId])
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// AUDIT LOG
+// ════════════════════════════════════════════════════════════════════════════
+
 model AuditLog {
-  id              String   @id @default(uuid())
-  action          String
-  metadata        Json
-  user            User?    @relation(fields: [userId], references: [id])
-  userId          String?
-  organization    Organization? @relation(fields: [organizationId], references: [id])
-  organizationId  String?
-  createdAt       DateTime @default(now())
+  id             String        @id @default(uuid())
+  action         String
+  metadata       Json
+  user           User?         @relation(fields: [userId], references: [id])
+  userId         String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  organizationId String?
+  createdAt      DateTime      @default(now())
 }
