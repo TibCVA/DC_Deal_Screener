@@ -9,4 +9,6 @@ export const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-export const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+// GPT-4o is the most capable model for complex analysis tasks
+// Can be overridden via OPENAI_MODEL env var (e.g., 'gpt-4-turbo', 'gpt-4o-mini' for cost savings)
+export const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
