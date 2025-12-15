@@ -3,10 +3,16 @@
  *
  * Generates a structured CSV/Excel-compatible export of deal analysis data
  * in a standardized format for investment committee review and pipeline tracking.
+ *
+ * Supports both legacy analysis format and DD Contract V1 format.
  */
 
 import { prisma } from '../prisma';
-import { UnderwritingTapeRow, ModuleStatus } from '../dd-ontology';
+import {
+  type UnderwritingTapeVariable,
+  type ModuleStatus,
+  UNDERWRITING_TAPE_VARIABLES,
+} from '../dd-contract-v1';
 
 // ════════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -178,6 +184,7 @@ export function extractTapeFromAnalysis(
 
 /**
  * Get fact by path from analysis data
+ * Supports both legacy format and DD Contract V1 format
  */
 function getFactByPath(run: any, variableId: string): { value: any; citations: string[]; confidence?: string } | null {
   // Check legacy evidence format
@@ -186,47 +193,54 @@ function getFactByPath(run: any, variableId: string): { value: any; citations: s
     return legacyFacts[variableId];
   }
 
-  // Check DD ontology format
+  // Check DD Contract V1 format
   const ddOntology = run.ddOntology;
   if (ddOntology) {
-    // Map variable ID to module and field
-    const moduleMap: Record<string, string> = {
-      reserved_mw: 'power_grid',
-      power_title_level: 'power_grid',
-      firmness_type: 'power_grid',
-      curtailment_cap_percent: 'power_grid',
-      energization_target: 'power_grid',
-      grid_connection_agreement: 'power_grid',
-      deep_works_required: 'power_grid',
-      queue_position: 'power_grid',
-      land_control_type: 'permitting_land',
-      land_area_sqm: 'permitting_land',
-      building_permit_status: 'permitting_land',
-      environmental_permit_status: 'permitting_land',
-      zoning_status: 'permitting_land',
-      total_it_capacity_mw: 'technical',
-      pue_target: 'technical',
-      tier_level: 'technical',
-      total_capex_eur: 'technical',
-      construction_duration_months: 'technical',
-      anchor_tenant: 'commercial',
-      loi_signed: 'commercial',
-      loi_mw_total: 'commercial',
-      contract_signed: 'commercial',
-      pre_lease_percentage: 'commercial',
-      target_price_eur_kw_month: 'commercial',
-      fiber_providers_available: 'connectivity',
-      distance_to_ix_km: 'connectivity',
-      diverse_routes_available: 'connectivity',
-      heat_reuse_obligation: 'esg',
-      heat_reuse_plan: 'esg',
-      renewable_energy_commitment: 'esg',
-      ppa_in_place: 'esg',
-    };
+    // V1 format: ddOntology.deal_evidence.facts[fact_code]
+    const v1Facts = ddOntology.deal_evidence?.facts;
+    if (v1Facts) {
+      // Map tape variable ID to V1 fact code
+      const v1FactMap: Record<string, string> = {
+        reserved_mw: 'grid_reserved_mw_firm',
+        power_title_level: 'grid_title_level_0_5',
+        firmness_type: 'grid_reserved_mw_flex', // Check if flex > 0
+        curtailment_cap_percent: 'grid_curtailment_cap',
+        energization_target: 'grid_energisation_target',
+        grid_connection_agreement: 'grid_title_level_0_5', // Level 4+ means signed
+        deep_works_required: 'grid_deep_works_flag',
+        queue_position: 'grid_next_milestone_or_expiry_date',
+        land_control_type: 'land_control_type',
+        building_permit_status: 'building_permit_status',
+        environmental_permit_status: 'environmental_permit_status',
+        anchor_tenant: 'target_customer_segment',
+        loi_signed: 'anchor_customer_stage_0_4', // Stage 2+ means LOI
+        loi_mw_total: 'prelet_mw',
+        contract_signed: 'anchor_customer_stage_0_4', // Stage 3+ means contract
+        pre_lease_percentage: 'prelet_mw',
+        fiber_providers_available: 'carrier_count_confirmed',
+        diverse_routes_available: 'diverse_routes_confirmed',
+      };
 
-    const modKey = moduleMap[variableId];
-    if (modKey && ddOntology[modKey] && ddOntology[modKey][variableId]) {
-      return ddOntology[modKey][variableId];
+      const factCode = v1FactMap[variableId] || variableId;
+      if (v1Facts[factCode]) {
+        return {
+          value: v1Facts[factCode].value,
+          citations: v1Facts[factCode].citations || [],
+          confidence: v1Facts[factCode].evidence_tier,
+        };
+      }
+    }
+
+    // Also check underwriting_tape directly in V1 format
+    const tape = ddOntology.underwriting_tape;
+    if (Array.isArray(tape)) {
+      const tapeVar = tape.find((t: any) => t.variable_code === variableId);
+      if (tapeVar) {
+        return {
+          value: tapeVar.value,
+          citations: tapeVar.citations || [],
+        };
+      }
     }
   }
 
@@ -234,35 +248,64 @@ function getFactByPath(run: any, variableId: string): { value: any; citations: s
 }
 
 /**
- * Get summary/derived values
+ * Get summary/derived values from either legacy or V1 format
  */
 function getSummaryValue(run: any, variableId: string): { value: any; status: string } | undefined {
+  const ddOntology = run.ddOntology;
+
   switch (variableId) {
     case 'overall_score':
+      // V1 format: ddOntology.scoring.overall.score_0_100
+      // Legacy format: policyEvaluation.weighted_score
+      const v1Score = ddOntology?.scoring?.overall?.score_0_100;
+      const legacyScore = run.policyEvaluation?.weighted_score;
       return {
-        value: run.ddOntology?.overall_score ?? run.policyEvaluation?.weighted_score ?? null,
-        status: 'VERIFIED',
+        value: v1Score ?? legacyScore ?? null,
+        status: v1Score != null || legacyScore != null ? 'VERIFIED' : 'UNKNOWN',
       };
+
     case 'recommendation':
+      // V1 format: ddOntology.scoring.hard_gate_result.decision
+      // Legacy format: policyEvaluation.recommendation
+      const v1Decision = ddOntology?.scoring?.hard_gate_result?.decision;
+      const legacyRec = run.policyEvaluation?.recommendation;
       return {
-        value: run.policyEvaluation?.recommendation ?? null,
-        status: run.policyEvaluation?.recommendation ? 'VERIFIED' : 'UNKNOWN',
+        value: v1Decision ?? legacyRec ?? null,
+        status: v1Decision || legacyRec ? 'VERIFIED' : 'UNKNOWN',
       };
+
     case 'energization_probability_24m':
+      // V1 format: ddOntology.scoring.energisation.curve[1].p (24m is index 1)
+      // Legacy format: energizationProbability.t_24m
+      const v1Curve = ddOntology?.scoring?.energisation?.curve;
+      const v1P24 = v1Curve?.find((c: any) => c.horizon_months === 24)?.p;
+      const legacyP24 = run.energizationProbability?.t_24m;
+      const p24Value = v1P24 != null ? Math.round(v1P24 * 100) : legacyP24;
       return {
-        value: run.energizationProbability?.t_24m ?? null,
-        status: run.energizationProbability?.t_24m ? 'VERIFIED' : 'UNKNOWN',
+        value: p24Value ?? null,
+        status: p24Value != null ? 'VERIFIED' : 'UNKNOWN',
       };
+
     case 'red_flag_count':
+      // V1 format: count checklist items with priority CRITICAL
+      // Legacy format: redFlags array length
+      const v1RedFlags = ddOntology?.checklist?.filter((c: any) => c.priority === 'CRITICAL') || [];
+      const legacyRedFlags = run.redFlags || [];
       return {
-        value: (run.redFlags || []).length,
+        value: v1RedFlags.length || legacyRedFlags.length,
         status: 'VERIFIED',
       };
+
     case 'contradiction_count':
+      // V1 format: ddOntology.deal_evidence.contradictions.length
+      // Legacy format: contradictions array length
+      const v1Contradictions = ddOntology?.deal_evidence?.contradictions || [];
+      const legacyContradictions = run.contradictions || [];
       return {
-        value: (run.contradictions || []).length,
+        value: v1Contradictions.length || legacyContradictions.length,
         status: 'VERIFIED',
       };
+
     default:
       return undefined;
   }
