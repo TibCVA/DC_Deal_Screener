@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { zodTextFormat } from 'openai/helpers/zod';
 import { sanitizeAllowedDomainsInput, normalizeUrlForClick } from './allowedDomains';
-import { openai, OPENAI_MODEL } from './openai';
+import { openai, OPENAI_MODEL, getOpenAIReasoning, getModelInfo } from './openai';
 import { prisma } from './prisma';
 
 type MarketResearch =
@@ -118,8 +118,13 @@ async function retrieveEvidenceSnippets(vectorStoreId?: string): Promise<Evidenc
   const seen = new Set<string>();
 
   for (const query of RETRIEVAL_QUERIES) {
+    // Correct signature per OpenAI API docs: object parameter with vector_store_id
     const search = await openaiClient.vectorStores
-      .search(vectorStoreId, { query, max_num_results: 5 })
+      .search({
+        vector_store_id: vectorStoreId,
+        query,
+        max_num_results: 5,
+      })
       .catch(() => ({ data: [] }));
 
     const results = (search?.data as any[]) || [];
@@ -161,23 +166,35 @@ function buildPromptFromSnippets(snippets: EvidenceSnippet[]) {
 }
 
 async function extractFacts(snippets: EvidenceSnippet[]) {
-  if (!openai?.responses?.create || snippets.length === 0) {
+  if (!openai?.responses?.parse || snippets.length === 0) {
     return { extracted_facts: DEFAULT_FACTS, checks: [{ priority: 'High', question: 'Provide evidence for grid connection and capacity.', why: 'No snippets retrieved', requested_artifact: 'Grid contract' }] };
   }
 
-  const prompt = buildPromptFromSnippets(snippets);
   const schema = z.object({
     extracted_facts: extractedFactsSchema,
     checks: checklistSchema,
   });
 
-  const format = zodTextFormat(schema, 'evidence_payload');
+  // Build structured input with system + user messages
+  const systemPrompt =
+    'You are an evidence-first analyst. Only use the provided snippets as sources. ' +
+    'Cite snippet_ids for every fact. If no evidence exists, return null and add a targeted question.';
+
+  const userPrompt = buildPromptFromSnippets(snippets);
+
+  // Use responses.parse with proper text format and reasoning (for GPT-5.x)
   const response = await (openai as any).responses
-    .create({
+    .parse({
       model: OPENAI_MODEL,
-      input: prompt,
       temperature: 0,
-      response_format: format,
+      reasoning: getOpenAIReasoning(), // undefined for GPT-4.x, { effort: 'high' } for GPT-5.x
+      input: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      text: {
+        format: zodTextFormat(schema, 'evidence_payload'),
+      },
     })
     .catch(() => null);
 
@@ -185,6 +202,7 @@ async function extractFacts(snippets: EvidenceSnippet[]) {
     return { extracted_facts: DEFAULT_FACTS, checks: [{ priority: 'High', question: 'Share substantiation for grid connection and permits.', why: 'OpenAI extraction failed', requested_artifact: 'Grid + permits' }] };
   }
 
+  // responses.parse returns output_parsed directly typed/validated
   let parsed: z.infer<typeof schema>;
   if (response.output_parsed) {
     parsed = response.output_parsed as z.infer<typeof schema>;
@@ -192,10 +210,12 @@ async function extractFacts(snippets: EvidenceSnippet[]) {
     const text = response.output_text || extractTextFromResponse(response);
     parsed = schema.parse(JSON.parse(text));
   }
+
   const snippetIds = new Set(snippets.map((s) => s.snippetId));
   const normalizedFacts = { ...DEFAULT_FACTS } as ExtractedFacts;
   const missingCitations: ChecklistItem[] = [];
 
+  // Citation integrity check: null out facts without valid citations
   (Object.keys(parsed.extracted_facts) as (keyof ExtractedFacts)[]).forEach((key) => {
     const fact = parsed.extracted_facts[key];
     const citations = (fact.citations || []).filter((c) => snippetIds.has(c));
@@ -281,10 +301,14 @@ async function runMarketResearch({
     'Cite sources inline using [1], [2] etc. Ensure citations map to the sources you consulted.',
   ].join('\n');
 
+  // Use reasoning for GPT-5.x models
+  const reasoning = getOpenAIReasoning();
+
   const response = await openaiClient.responses
     .create({
       model: OPENAI_MODEL,
       input: prompt,
+      ...(reasoning && { reasoning }),
       tools: [{ type: 'web_search', filters: { allowed_domains: allowedDomains } }],
       include: ['web_search_call.action.sources'],
     })
@@ -353,6 +377,9 @@ export async function runDeterministicAnalysis({
 
   const summary = `Evidence-led view: ${scorecard.filter((s) => s.status === ScoreStatusValues.VERIFIED).length} verified, ${scorecard.filter((s) => s.status === ScoreStatusValues.UNKNOWN).length} unknown. Energization confidence: ${confidence}%`;
 
+  // Get model info for audit trail
+  const modelInfo = getModelInfo();
+
   const run = await prisma.analysisRun.create({
     data: {
       dealId: deal.id,
@@ -365,7 +392,8 @@ export async function runDeterministicAnalysis({
       marketResearchIncluded: Boolean(includeMarketResearch),
       status: 'SUCCESS',
       errorMessage: null,
-      modelUsed: OPENAI_MODEL,
+      modelUsed: modelInfo.model,
+      reasoningEffort: modelInfo.reasoningEffort,
     },
   });
 

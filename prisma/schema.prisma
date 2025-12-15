@@ -224,6 +224,7 @@ model AnalysisRun {
   status                 AnalysisRunStatus         @default(SUCCESS)
   errorMessage           String?
   modelUsed              String?
+  reasoningEffort        String?                   // 'none' | 'low' | 'medium' | 'high' | 'xhigh' for GPT-5.x
 
   // NEW: Extended DD ontology results
   ddOntology             Json?                     // Full DDAnalysisResult
